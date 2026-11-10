@@ -76,11 +76,13 @@
       <button type="button" class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
     </div>
     <div class="sheet-body">
-      <label class="field"><span>URL API utama (LAN)</span>
-        <input id="setUrl1" placeholder="192.168.7.1" autocapitalize="off" spellcheck="false"></label>
-      <label class="field"><span>URL cadangan (mis. Tailscale), opsional</span>
-        <input id="setUrl2" placeholder="alamat Tailscale router" autocapitalize="off" spellcheck="false"></label>
-      <p class="hint">Cukup isi alamat IP; jalur <span class="mono">/cgi-bin/hpmon/index.sh</span> ditambahkan otomatis. URL cadangan dipakai bila URL utama tidak terjangkau.</p>
+      <label class="field"><span>URL 1 — LAN (utama)</span>
+        <input id="setUrl1" placeholder="192.168.7.1:8091" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>URL 2 — Tailscale (opsional)</span>
+        <input id="setUrl2" placeholder="alamat Tailscale router:8091" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>URL 3 — Cloudflare (opsional)</span>
+        <input id="setUrl3" placeholder="https://hpmon.domainmu.my.id" autocapitalize="off" spellcheck="false"></label>
+      <p class="hint">Cukup isi alamat (IP:port atau domain); jalur <span class="mono">/cgi-bin/hpmon/index.sh</span> ditambahkan otomatis. Aplikasi memakai URL yang terakhir berhasil lebih dulu, lalu mencoba yang lain bila tidak terjangkau.</p>
       <label class="field"><span>Token API</span>
         <div class="row"><input id="setToken" type="password" autocapitalize="off" spellcheck="false">
         <button type="button" class="btn ghost small" id="tokenToggle">Lihat</button></div></label>

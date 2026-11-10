@@ -10,16 +10,18 @@ Aplikasi Android untuk memantau HP yang terhubung ke WiFi router **OpenWrt**. Ro
 
 - Daftar HP yang dipantau: status online (ping dari router), status ADB, baterai, layar, model dan versi Android, WiFi (SSID dan kekuatan sinyal), latensi, lama hidup.
 - Trafik tiap HP: total unduh/unggah sejak boot dan **kecepatan** (dihitung dari selisih dua sampel).
+- Nama HP mengikuti **hostname di router** (static lease / Hostnames / DHCP).
+- Ikon dan badge **charger** saat HP mengisi. Di layar detail (ketuk kartu): sumber charger, arus (bila dibaca Android), suhu, tegangan, rata-rata pemakaian baterai beserta perkiraan sisa waktu, dan aplikasi yang sedang aktif.
 - Detail langsung dari HP (lewat ADB): pemakaian RAM, CPU, dan daftar aplikasi pihak ketiga (dengan pencarian).
 - **Tambah dan hapus IP** yang dipantau langsung dari aplikasi.
-- URL cadangan (mis. alamat Tailscale) yang dipakai otomatis bila URL LAN tidak terjangkau.
+- **Tiga URL**: LAN, Tailscale, dan Cloudflare (HTTPS, domain sendiri). Aplikasi memakai URL yang terakhir berhasil lebih dulu dan otomatis pindah bila tidak terjangkau.
 - Banner peringatan bila router tidak terjangkau atau data di router berhenti diperbarui.
 
 ## Cara pakai
 
 1. Pasang layanan hpmon di router (lihat [`router/`](router/README.md)) dan siapkan token API.
 2. Unduh APK dari halaman [Releases](../../releases) (atau dari *Artifacts* di tab Actions), lalu pasang.
-3. Buka aplikasi → **Pengaturan**: isi alamat router (cukup IP, mis. `192.168.7.1`), token API, dan (opsional) URL cadangan. Tekan **Tes koneksi**, lalu **Simpan**.
+3. Buka aplikasi → **Pengaturan**: isi URL 1 (LAN, mis. `192.168.7.1:8091`), token API, dan (opsional) URL 2 Tailscale dan URL 3 Cloudflare. Tekan **Tes koneksi**, lalu **Simpan**.
 4. Tekan **+** untuk menambah IP HP yang ingin dipantau.
 
 ### Mengaktifkan ADB di HP

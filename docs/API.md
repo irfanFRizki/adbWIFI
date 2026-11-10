@@ -6,7 +6,9 @@ Seluruh endpoint di bawah sudah diuji dengan `curl` di router.
 
 ## Dasar
 
-- URL dasar: `http://<IP-ROUTER>/cgi-bin/hpmon/index.sh` (HTTP biasa, port 80).
+- URL dasar (port khusus, disarankan): `http://<IP-ROUTER>:8091/cgi-bin/hpmon/index.sh`. Instance uhttpd ini hanya menyajikan API hpmon (tanpa LuCI), terikat ke IP LAN, IP Tailscale, dan 127.0.0.1.
+- Lewat Cloudflare Tunnel (HTTPS): `https://<subdomain>.my.id/cgi-bin/hpmon/index.sh`, mengarah ke `127.0.0.1:8091`.
+- Port 80 (`http://<IP-ROUTER>/cgi-bin/hpmon/index.sh`) masih berfungsi untuk kompatibilitas.
 - Header wajib di setiap request: `Authorization: Bearer <TOKEN>`.
 - Body POST: JSON dengan `Content-Type: application/json`.
 - Semua respons berformat JSON. Kesalahan berbentuk `{"error":"<kode>"}` dengan kode status HTTP yang sesuai.
@@ -22,10 +24,13 @@ Semua target (dari cache).
   "timestamp": 1794271037,
   "devices": [
     {
-      "ip": "192.168.7.177", "nama": "HP-177", "port_adb": 5555,
+      "ip": "192.168.7.177", "nama": "HP-177", "hostname": "HP_AQILLA", "port_adb": 5555,
       "router": { "online": true, "latency": "146.039 ms", "mac": "20:34:fb:d3:f7:ca", "connections": 14 },
-      "adb": { "status": "connected", "port_terdeteksi": 5555, "battery": "68", "model": "Redmi Note 7",
-               "android": "10", "screen": "Asleep", "uptime": 248518, "wifi_ssid": "IRFAN", "wifi_rssi": -30 },
+      "adb": { "status": "connected", "port_terdeteksi": 5555, "battery": "65", "model": "Redmi Note 7",
+               "android": "10", "screen": "Asleep", "uptime": 273190, "wifi_ssid": "IRFAN", "wifi_rssi": -29,
+               "charging": false, "charge_source": null, "temp_c": 44.0, "voltage_mv": 3965,
+               "current_ma": null, "current_available": false, "avg_drain_pct_per_hour": null,
+               "foreground_app": { "package": null, "label": null } },
       "rx_bytes": 4014889816, "tx_bytes": 1059967337, "rxtx_source": "adb", "rxtx_ts": 1794271108, "rxtx_available": true
     },
     {
@@ -90,6 +95,7 @@ Menghapus target. Body: `{"ip":"192.168.7.188"}`. Berhasil → `{"ok":true}`.
 |-------|------|------|------------|
 | `timestamp` | integer | tidak | Epoch detik saat cache dibuat |
 | `ip`, `nama` | string | tidak | Alamat IPv4 dan label target |
+| `hostname` | string | ya | Nama host dari router (static lease, Hostnames/domain record, lalu `dhcp.leases`); `null` bila tidak ada. Klien sebaiknya menampilkan `hostname` lebih dulu, lalu `nama` |
 | `port_adb` | integer | tidak | Port ADB yang tersimpan |
 | `router.online` | boolean | tidak | Hasil ping dari router |
 | `router.latency` | string | tidak | Mis. `"146.039 ms"`; `""` bila offline |
@@ -103,6 +109,14 @@ Menghapus target. Body: `{"ip":"192.168.7.188"}`. Berhasil → `{"ok":true}`.
 | `adb.uptime` | integer | ya | Detik sejak HP boot |
 | `adb.wifi_ssid` | string | ya | SSID yang tersambung |
 | `adb.wifi_rssi` | integer | ya | Sinyal dalam dBm (negatif) |
+| `adb.charging` | boolean | ya | `true` bila sedang mengisi |
+| `adb.charge_source` | string | ya | `"ac"`, `"usb"`, `"wireless"`, atau `null` |
+| `adb.temp_c` | number | ya | Suhu baterai (°C) |
+| `adb.voltage_mv` | integer | ya | Tegangan baterai (mV) |
+| `adb.current_ma` | number | ya | Arus baterai (mA): positif = mengisi, negatif = dipakai. `null` bila Android membatasi pembacaan (sering terjadi tanpa root) |
+| `adb.current_available` | boolean | tidak | `false` bila `current_ma` tidak dapat dibaca |
+| `adb.avg_drain_pct_per_hour` | number | ya | Rata-rata penurunan baterai %/jam saat tidak mengisi (3 jam terakhir); `null` bila data kurang dari ±30 menit atau sedang mengisi |
+| `adb.foreground_app` | object | tidak | `{ "package": string\|null, "label": string\|null }`; `package` `null` bila layar mati/terkunci. `label` hanya terisi untuk aplikasi di `/etc/hpmon/app-labels.json`. Klien juga sebaiknya membaca `detail.foreground_app` bila ada |
 | `rx_bytes`, `tx_bytes` | integer | ya | Byte **kumulatif sejak HP boot** (wlan0 HP, via ADB), bukan laju |
 | `rxtx_source` | string | ya | `"adb"` atau `null` |
 | `rxtx_ts` | integer | ya | Epoch detik saat rx/tx diambil |

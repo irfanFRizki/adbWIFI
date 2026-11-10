@@ -9,7 +9,7 @@
   var STALE_MS = 180000; // data router dianggap basi bila timestamp tak berubah 3 menit
 
   var state = {
-    settings: { url1: '', url2: '', token: '', interval: 30 },
+    settings: { url1: '', url2: '', url3: '', token: '', interval: 30 },
     devices: [],
     serverTs: null,
     tsChangedAt: 0,
@@ -54,7 +54,7 @@
       method: req.method,
       headers: req.headers,
       data: req.body,
-      connectTimeout: 8000,
+      connectTimeout: 5000,
       readTimeout: req.timeout || 15000,
       responseType: 'text'
     }).then(function (r) { return { status: r.status, data: r.data }; });
@@ -62,7 +62,7 @@
   function transport(req) { return isNative() ? nativeTransport(req) : L.fetchTransport(req); }
 
   var api = L.createApi({
-    getSettings: function () { return { urls: [state.settings.url1, state.settings.url2], token: state.settings.token }; },
+    getSettings: function () { return { urls: [state.settings.url1, state.settings.url2, state.settings.url3], token: state.settings.token }; },
     transport: transport
   });
 
@@ -130,6 +130,43 @@
     for (var i = 1; i <= 4; i++) h += '<i class="' + (i <= bars ? 'on' : '') + '"></i>';
     return h + '</span>';
   }
+  var BOLT = '<svg class="bolt" viewBox="0 0 9 12" aria-hidden="true"><path d="M5.5 0L0 7h3.5L3 12l6-7.5H5.5z"/></svg>';
+
+  function batteryHtml(dev) {
+    var a = dev.adb || {};
+    if (a.status !== 'connected') return '';
+    var bat = a.battery === undefined || a.battery === null || a.battery === '' ? null : Number(a.battery);
+    if (bat !== null && isNaN(bat)) bat = null;
+    var chg = L.isCharging(dev);
+    var h = '<div class="sec"><h3>Baterai</h3><div class="hero">' + (chg ? BOLT : '') +
+      '<b>' + (bat === null ? '—' : bat + '%') + '</b><span>' +
+      (chg ? 'Mengisi' + (L.chargeSourceText(a.charge_source) ? ' · ' + esc(L.chargeSourceText(a.charge_source)) : '') :
+        (a.charging === false ? 'Tidak mengisi' : '')) + '</span></div>' +
+      (bat === null ? '' : bar(bat)) + '<div class="kv" style="margin-top:12px">';
+    h += metric('Arus', typeof a.current_ma === 'number' ? esc(L.formatCurrent(a.current_ma)) +
+      (a.current_ma > 0 ? ' <span class="sub">mengisi</span>' : (a.current_ma < 0 ? ' <span class="sub">dipakai</span>' : '')) :
+      '<span class="unavail">Tidak tersedia (dibatasi Android)</span>');
+    h += metric('Suhu', '<span class="temp-' + (L.tempLevel(a.temp_c) || 'ok') + '">' + esc(L.formatTemp(a.temp_c)) + '</span>');
+    h += metric('Tegangan', esc(L.formatVoltage(a.voltage_mv)));
+    if (chg) {
+      h += metric('Pemakaian rata-rata', '<span class="unavail">Tidak dihitung saat mengisi</span>');
+    } else if (typeof a.avg_drain_pct_per_hour === 'number') {
+      var rem = L.estimateRemaining(bat, a.avg_drain_pct_per_hour);
+      h += metric('Pemakaian rata-rata', esc(L.formatDrain(a.avg_drain_pct_per_hour)) + (rem ? ' <span class="sub">sisa ' + esc(rem) + '</span>' : ''));
+    } else {
+      h += metric('Pemakaian rata-rata', '<span class="unavail">Mengumpulkan data (butuh ±30 menit tanpa mengisi)</span>');
+    }
+    return h + '</div></div>';
+  }
+
+  function foregroundHtml(dev) {
+    var fg = L.foregroundApp(dev);
+    var a = dev.adb || {};
+    if (fg) return esc(fg.text) + (fg.pkg && fg.pkg !== fg.text ? '<div class="sub mono" style="margin-top:2px">' + esc(fg.pkg) + '</div>' : '');
+    if (a.screen === 'Asleep') return '<span class="unavail">Layar mati</span>';
+    return '<span class="unavail">Tidak terdeteksi</span>';
+  }
+
   function screenText(s) {
     if (s === 'Awake') return 'Menyala';
     if (s === 'Asleep') return 'Tidur';
@@ -137,7 +174,7 @@
     return s ? esc(s) : '—';
   }
 
-  function metricsHtml(dev) {
+  function metricsHtml(dev, inDetail) {
     var r = dev.router || {}, a = dev.adb || {};
     var lat = L.parseLatency(r.latency);
     var latHtml = lat === null ? '—' : lat + ' ms';
@@ -145,7 +182,7 @@
 
     if (a.status === 'connected') {
       var bat = a.battery === undefined || a.battery === null || a.battery === '' ? null : Number(a.battery);
-      h += metric('Baterai', bat === null || isNaN(bat) ? '—' : (bat + '%' + bar(bat)));
+      if (!inDetail) h += metric('Baterai', (L.isCharging(dev) ? BOLT : '') + (bat === null || isNaN(bat) ? '—' : (bat + '%' + bar(bat))));
       h += metric('Layar', screenText(a.screen));
       h += metric('Perangkat', esc((a.model || '—') + (a.android ? ' · Android ' + a.android : '')), true);
       var rssi = typeof a.wifi_rssi === 'number' ? a.wifi_rssi : null;
@@ -184,8 +221,10 @@
     var online = !!r.online, conn = a.status === 'connected';
     var cls = 'card' + (online ? ' on' : '') + (online && !conn ? ' noadb' : '') + (state.error ? ' stale' : '');
     return '<article class="' + cls + '" data-ip="' + esc(dev.ip) + '">' +
-      '<div class="card-head"><div><h2>' + esc(dev.nama || dev.ip) + '</h2><p class="mono sub">' + esc(dev.ip) + ':' + esc(dev.port_adb) + '</p></div>' +
-      '<div class="badges">' + badge(online ? 'ONLINE' : 'OFFLINE', online ? 'good' : 'bad') +
+      '<div class="card-head"><div><h2>' + esc(L.displayName(dev)) + '</h2><p class="mono sub">' + esc(dev.ip) + ':' + esc(dev.port_adb) +
+      (L.altName(dev) ? ' · <span style="white-space:nowrap">' + esc(L.altName(dev)) + '</span>' : '') + '</p></div>' +
+      '<div class="badges">' + (L.isCharging(dev) ? '<span class="badge chg">' + BOLT + 'CHARGE</span>' : '') +
+      badge(online ? 'ONLINE' : 'OFFLINE', online ? 'good' : 'bad') +
       badge(conn ? 'ADB' : 'NO ADB', conn ? 'good' : (online ? 'warn' : '')) + '</div></div>' +
       metricsHtml(dev) + noteHtml(dev) + '</article>';
   }
@@ -222,7 +261,9 @@
     if (state.detailIp) {
       var dev = findDev(state.detailIp);
       var top = $('#dBasic');
-      if (dev && top) top.innerHTML = metricsHtml(dev) + noteHtml(dev);
+      if (dev && top) top.innerHTML = metricsHtml(dev, true) + noteHtml(dev);
+      var bt = $('#dBattery');
+      if (dev && bt) bt.innerHTML = batteryHtml(dev);
     }
   }
 
@@ -286,7 +327,7 @@
   }
 
   function detailHtml(dev, detail, mode) {
-    var h = '<div id="dBasic">' + metricsHtml(dev) + noteHtml(dev) + '</div>';
+    var h = '<div id="dBasic">' + metricsHtml(dev, true) + noteHtml(dev) + '</div><div id="dBattery">' + batteryHtml(dev) + '</div>';
     if (mode === 'none') return h;
     h += '<div class="sec"><h3>Detail langsung dari HP</h3><div id="dLive">';
     if (mode === 'loading') {
@@ -308,6 +349,7 @@
       var cpu = detail.cpu_percent;
       h += metric('CPU', cpu === null || cpu === undefined ? '—' :
         (cpu + '%' + bar(100 - cpu, cpu >= 85 ? 'low' : (cpu >= 60 ? 'mid' : 'cy'))), true);
+      h += metric('Aplikasi aktif', foregroundHtml(Object.assign({}, dev, { detail: detail })), true);
       h += '</div>';
     }
     h += '</div></div>';
@@ -323,8 +365,8 @@
     var dev = findDev(ip);
     if (!dev) return;
     state.detailIp = ip;
-    $('#dTitle').textContent = dev.nama || dev.ip;
-    $('#dSub').textContent = dev.ip + ':' + dev.port_adb;
+    $('#dTitle').textContent = L.displayName(dev);
+    $('#dSub').textContent = dev.ip + ':' + dev.port_adb + (L.altName(dev) ? ' · ' + L.altName(dev) : '');
     openLayer('layerDetail');
     loadDetail();
   }
@@ -359,7 +401,7 @@
     var ip = state.detailIp;
     var dev = ip && findDev(ip);
     if (!dev) return;
-    if (!window.confirm('Hapus ' + (dev.nama || dev.ip) + ' (' + dev.ip + ') dari daftar pantauan?')) return;
+    if (!window.confirm('Hapus ' + L.displayName(dev) + ' (' + dev.ip + ') dari daftar pantauan?')) return;
     try {
       await api.deleteTarget(ip);
       toast('Target dihapus.');
@@ -420,6 +462,7 @@
   function openSettings(first) {
     $('#setUrl1').value = state.settings.url1;
     $('#setUrl2').value = state.settings.url2;
+    $('#setUrl3').value = state.settings.url3;
     $('#setToken').value = state.settings.token;
     $('#setToken').type = 'password';
     $('#tokenToggle').textContent = 'Lihat';
@@ -433,11 +476,14 @@
     var url1 = L.normalizeBaseUrl($('#setUrl1').value);
     var raw2 = $('#setUrl2').value.trim();
     var url2 = raw2 ? L.normalizeBaseUrl(raw2) : '';
+    var raw3 = $('#setUrl3').value.trim();
+    var url3 = raw3 ? L.normalizeBaseUrl(raw3) : '';
     var token = $('#setToken').value.trim();
     if (!url1) return { error: 'URL API utama belum diisi atau tidak valid.' };
-    if (raw2 && !url2) return { error: 'URL cadangan tidak valid.' };
+    if (raw2 && !url2) return { error: 'URL 2 (Tailscale) tidak valid.' };
+    if (raw3 && !url3) return { error: 'URL 3 (Cloudflare) tidak valid.' };
     if (!token) return { error: 'Token API belum diisi.' };
-    return { value: { url1: url1, url2: url2, token: token, interval: Number($('#setInterval').value) || 30 } };
+    return { value: { url1: url1, url2: url2, url3: url3, token: token, interval: Number($('#setInterval').value) || 30 } };
   }
 
   $('#btnSettings').addEventListener('click', function () { openSettings(false); });
@@ -453,7 +499,7 @@
     var f = readSettingsForm();
     if (f.error) return showFormError('#setMsg', f.error);
     var tmp = L.createApi({
-      getSettings: function () { return { urls: [f.value.url1, f.value.url2], token: f.value.token }; },
+      getSettings: function () { return { urls: [f.value.url1, f.value.url2, f.value.url3], token: f.value.token }; },
       transport: transport
     });
     showFormError('#setMsg', 'Menguji koneksi…', true);
@@ -471,7 +517,7 @@
     if (f.error) return showFormError('#setMsg', f.error);
     state.settings = f.value;
     await Promise.all([
-      storeSet('url1', f.value.url1), storeSet('url2', f.value.url2),
+      storeSet('url1', f.value.url1), storeSet('url2', f.value.url2), storeSet('url3', f.value.url3),
       storeSet('token', f.value.token), storeSet('interval', f.value.interval)
     ]);
     state.devices = [];
@@ -487,9 +533,9 @@
   /* ---------- mulai ---------- */
 
   async function init() {
-    var v = await Promise.all([storeGet('url1'), storeGet('url2'), storeGet('token'), storeGet('interval')]);
+    var v = await Promise.all([storeGet('url1'), storeGet('url2'), storeGet('token'), storeGet('interval'), storeGet('url3')]);
     state.settings = {
-      url1: v[0] || '', url2: v[1] || '', token: v[2] || '',
+      url1: v[0] || '', url2: v[1] || '', url3: v[4] || '', token: v[2] || '',
       interval: [15, 30, 60].indexOf(Number(v[3])) !== -1 ? Number(v[3]) : 30
     };
     $('#verLabel').textContent = 'v' + (window.APP_VERSION || 'dev');
