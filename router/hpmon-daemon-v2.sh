@@ -13,11 +13,21 @@ log() {
   logger -t hpmon-daemon "$@"
 }
 
+# Escape string agar aman disisipkan ke dalam JSON (BusyBox-compatible, tanpa jq).
+# Menghindari cache rusak bila SSID/model/nama mengandung " \ atau karakter kontrol.
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' | tr -d '\n'
+}
+
 # Atomic write helper: tulis ke file sementara lalu mv
 atomic_write() {
   local file="$1"; shift
   local tmp="${file}.tmp.$$"
+  # flock:hindari race antara daemon write dan CGI read (cache rusak bila setengah ditulis)
+  exec 9>"$file.lock"
+  flock 9
   cat > "$tmp" && mv "$tmp" "$file"
+  exec 9>&-
 }
 
 # Jalankan perintah ADB dengan batas waktu tanpa GNU timeout (tidak tersedia di BusyBox).
@@ -104,9 +114,10 @@ get_router_data() {
   local mac=""
   local conns=0
 
-  if ping -c1 -W1 "$ip" >/dev/null 2>&1; then
+  ping_result=$(ping -c2 -W1 "$ip" 2>/dev/null)
+  if [ $? -eq 0 ]; then
     online="true"
-    latency=$(ping -c3 -W1 "$ip" 2>/dev/null | grep avg | awk -F'/' '{print $5}')
+    latency=$(printf '%s\n' "$ping_result" | grep avg | awk -F'/' '{print $5}')
   fi
 
   mac=$(ip neigh show "$ip" 2>/dev/null | awk '{print $5}' | head -1)
@@ -160,6 +171,7 @@ compute_avg_drain() {
 get_adb_data() {
   local ip="$1"
   local port="$2"
+  local adb_devices_out="${3:-}"
   local addr="${ip}:${port}"
   local adb_status="unreachable"
   local adb_error=""
@@ -177,8 +189,8 @@ get_adb_data() {
   local current_ma="null" current_available="false" avg_drain_pct_per_hour="null"
   local fg_pkg="null" fg_label="null"
 
-  # Cari entri ip:port aktif di `adb devices -l`
-  dev_entry=$(adb devices -l 2>/dev/null | grep "^${ip}:" | head -1)
+  [ -z "$adb_devices_out" ] && adb_devices_out=$(adb devices -l 2>/dev/null)
+  dev_entry=$(printf '%s\n' "$adb_devices_out" | grep "^${ip}:" | head -1)
   if [ -n "$dev_entry" ]; then
     detected_port=$(echo "$dev_entry" | awk '{print $1}' | cut -d: -f2)
     found_state=$(echo "$dev_entry" | awk '{print $2}')
@@ -210,13 +222,13 @@ get_adb_data() {
       wait "$apid" 2>/dev/null
     fi
 
-    dev_state=$(adb devices 2>/dev/null | grep "^${addr}" | awk '{print $2}')
+    dev_state=$(printf '%s\n' "$adb_devices_out" | grep "^${addr}" | awk '{print $2}')
     case "$dev_state" in
       device) adb_status="connected" ;;
       unauthorized) adb_status="unauthorized"; adb_error="unauthorized" ;;
       offline) adb_status="offline"; adb_error="offline" ;;
       "")
-        any_entry=$(adb devices 2>/dev/null | grep "^${ip}:" | head -1)
+        any_entry=$(printf '%s\n' "$adb_devices_out" | grep "^${ip}:" | head -1)
         if [ -n "$any_entry" ]; then
           any_port=$(echo "$any_entry" | awk '{print $1}' | cut -d: -f2)
           adb_status="port_salah"
@@ -308,9 +320,11 @@ get_adb_data() {
   [ -n "$adb_error" ] && printf ',"error":"%s"' "$adb_error"
   [ -n "$detected_port" ] && printf ',"port_terdeteksi":%s' "$detected_port"
   if [ "$adb_status" = "connected" ]; then
-    # existing fields preserved
+    # existing fields preserved (nilai string di-escape agar aman untuk JSON)
+    model_j=$(json_escape "${model:-}"); android_j=$(json_escape "${android:-}")
+    screen_j=$(json_escape "${screen:-}"); wifi_ssid_j=$(json_escape "${wifi_ssid:-}")
     printf ',"battery":"%s","model":"%s","android":"%s","screen":"%s","uptime":%s,"wifi_ssid":"%s","wifi_rssi":%s' \
-      "${battery:-}" "${model:-}" "${android:-}" "${screen:-}" "${uptime:-0}" "${wifi_ssid:-}" "${wifi_rssi:-null}"
+      "${battery:-}" "$model_j" "$android_j" "$screen_j" "${uptime:-0}" "$wifi_ssid_j" "${wifi_rssi:-null}"
     # Fase B new fields in adb object
     printf ',"charging":%s,"charge_source":%s,"temp_c":%s,"voltage_mv":%s,"current_ma":%s,"current_available":%s,"avg_drain_pct_per_hour":%s' \
       "$charging" "$charge_source" "$temp_c" "$voltage_mv" "$current_ma" "$current_available" "$avg_drain_pct_per_hour"
@@ -332,6 +346,7 @@ update_cache() {
 
   count=$(jq -r 'length' "$TARGETS_FILE")
   i=0
+  adb_devices_snapshot=$(adb devices -l 2>/dev/null)
 
   while [ $i -lt $count ]; do
     ip=$(jq -r ".[$i].ip" "$TARGETS_FILE")
@@ -342,7 +357,7 @@ update_cache() {
     first=0
 
     router_data=$(get_router_data "$ip")
-    adb_data=$(get_adb_data "$ip" "$port")
+    adb_data=$(get_adb_data "$ip" "$port" "$adb_devices_snapshot")
     hn_info=$(get_hostname_for_ip "$ip")
     hostname_val=$(printf '%s' "$hn_info" | cut -d'|' -f1)
     hostname_src=$(printf '%s' "$hn_info" | cut -d'|' -f2-)
@@ -358,7 +373,7 @@ update_cache() {
       rxtx_data='"rx_bytes":null,"tx_bytes":null,"rxtx_source":null,"rxtx_ts":null,"rxtx_available":false'
     fi
 
-    if [ "$hostname_val" = "null" ]; then hn_json="null"; else hn_json="\"$hostname_val\""; fi; result="${result}{\"ip\":\"$ip\",\"nama\":\"$nama\",\"hostname\":$hn_json,\"port_adb\":$port,\"router\":$router_data,\"adb\":$adb_data,${rxtx_data}}"
+    if [ "$hostname_val" = "null" ]; then hn_json="null"; else hn_json="\"$(json_escape "$hostname_val")\""; fi; nama_j=$(json_escape "$nama"); result="${result}{\"ip\":\"$ip\",\"nama\":\"$nama_j\",\"hostname\":$hn_json,\"port_adb\":$port,\"router\":$router_data,\"adb\":$adb_data,${rxtx_data}}"
     i=$((i+1))
   done
 
@@ -378,6 +393,8 @@ if [ -f "$PIDFILE" ]; then
   fi
 fi
 echo $$ > "$PIDFILE"
+cleanup() { rm -f "$PIDFILE" /tmp/hpmon_adb_out.$$ /tmp/hpmon_cgi_adb_$$; }
+trap cleanup EXIT INT TERM
 
 log "Starting hpmon daemon v2 (interval=${INTERVAL}s)"
 
