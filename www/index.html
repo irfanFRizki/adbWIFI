@@ -37,6 +37,7 @@
     <div id="dBody" class="sheet-body"></div>
     <div class="sheet-foot">
       <button class="btn ghost" id="dReload">Muat ulang detail</button>
+      <button class="btn" id="dRefreshIp">Segarkan IP ini</button>
       <button class="btn danger" id="dDelete">Hapus target</button>
     </div>
   </section>
@@ -88,6 +89,7 @@
         <button type="button" class="btn ghost small" id="tokenToggle">Lihat</button></div></label>
       <label class="field"><span>Segarkan otomatis</span>
         <select id="setInterval">
+          <option value="10">Tiap 10 detik</option>
           <option value="15">Tiap 15 detik</option>
           <option value="30">Tiap 30 detik</option>
           <option value="60">Tiap 60 detik</option>

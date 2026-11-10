@@ -290,6 +290,9 @@
         return request('GET', '/status?ip=' + encodeURIComponent(ip) + '&detail=1', undefined, 20000)
           .then(function (r) { return r.data; });
       },
+      refreshIp: function (ip) {
+        return request('POST', '/refresh', { ip: ip }, 20000).then(function (r) { return r.data; });
+      },
       targets: function () {
         return request('GET', '/targets', undefined, 15000).then(function (r) { return r.data; });
       },
