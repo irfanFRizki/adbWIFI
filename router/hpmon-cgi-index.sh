@@ -130,6 +130,7 @@ else
         STATUS="405 Method Not Allowed"; BODY='{"error":"method_not_allowed"}'
       else
         DATA=$(cat)
+        exec 9>"$TARGETS_FILE.lock"
         if ! printf '%s' "$DATA" | jq -e 'type == "object"' >/dev/null 2>&1; then
           STATUS="400 Bad Request"; BODY='{"error":"invalid_json"}'
         else
@@ -140,6 +141,7 @@ else
             if ! jq -e --arg ip "$IP" 'any(.[]; .ip==$ip)' "$TARGETS_FILE" >/dev/null 2>&1; then
               STATUS="404 Not Found"; BODY='{"error":"not_found"}'
             else
+              flock 9
               cp "$TARGETS_FILE" "$TARGETS_FILE.bak.$(date +%Y%m%d-%H%M%S)" || { STATUS="500 Internal Server Error"; BODY='{"error":"backup_failed"}'; }
               if [ "$STATUS" = "200 OK" ]; then
                 TMP="$TARGETS_FILE.tmp.$$"
@@ -154,6 +156,7 @@ else
             elif jq -e --arg ip "$IP" 'any(.[]; .ip==$ip)' "$TARGETS_FILE" >/dev/null 2>&1; then
               STATUS="409 Conflict"; BODY='{"error":"ip_duplicate"}'
             else
+              flock 9
               cp "$TARGETS_FILE" "$TARGETS_FILE.bak.$(date +%Y%m%d-%H%M%S)" || { STATUS="500 Internal Server Error"; BODY='{"error":"backup_failed"}'; }
               if [ "$STATUS" = "200 OK" ]; then
                 TMP="$TARGETS_FILE.tmp.$$"
@@ -162,6 +165,7 @@ else
             fi
           fi
         fi
+        exec 9>&-
       fi
       ;;
     *) STATUS="404 Not Found"; BODY='{"error":"not_found"}' ;;
