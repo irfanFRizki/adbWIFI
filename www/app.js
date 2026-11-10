@@ -20,6 +20,9 @@
   };
   var inflight = false;
   var timer = null;
+  var fastTimer = null;
+  var fastEnd = 0;
+  var resumeQueued = false;
   var detailSeq = 0;
   var detailApps = [];
   var toastTimer = null;
@@ -106,9 +109,15 @@
     } else if (state.error) {
       msg = L.errorMessage(state.error);
       if (state.devices.length) msg += ' Menampilkan data terakhir (' + L.formatAge((Date.now() - state.fetchedAt) / 1000) + ' lalu).';
-    } else if (state.devices.length && Date.now() - state.tsChangedAt > STALE_MS) {
-      msg = 'Data di router tidak diperbarui lebih dari ' + L.formatAge((Date.now() - state.tsChangedAt) / 1000) + '. Layanan hpmon di router mungkin berhenti.';
-      cls += ' warn';
+    } else if (state.devices.length && state.serverTs) {
+      var ageSec = Math.max(0, Math.floor(Date.now() / 1000 - Number(state.serverTs)));
+      msg = 'Diperbarui ' + L.formatAge(ageSec) + ' lalu';
+      if (ageSec * 1000 > STALE_MS) {
+        msg += '. Data di router mungkin basi.';
+        cls += ' warn';
+      } else {
+        cls += ' ok';
+      }
     }
     el.className = msg ? cls : 'banner hidden';
     el.textContent = msg;
@@ -225,7 +234,11 @@
       (L.altName(dev) ? ' · <span style="white-space:nowrap">' + esc(L.altName(dev)) + '</span>' : '') + '</p></div>' +
       '<div class="badges">' + (L.isCharging(dev) ? '<span class="badge chg">' + BOLT + 'CHARGE</span>' : '') +
       badge(online ? 'ONLINE' : 'OFFLINE', online ? 'good' : 'bad') +
-      badge(conn ? 'ADB' : 'NO ADB', conn ? 'good' : (online ? 'warn' : '')) + '</div></div>' +
+      badge(conn ? 'ADB' : 'NO ADB', conn ? 'good' : (online ? 'warn' : '')) +
+      '<button type="button" class="mini-refresh" data-refresh-ip="' + esc(dev.ip) + '" title="Segarkan IP ini">' +
+        '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6a4 4 0 0 1 7.1-2.2L9 5h2L10 2 8 0l1.1 1.1A6 6 0 1 0 6 12H4a8 8 0 1 1 2-6z"/></svg>' +
+      '</button>' +
+      '</div></div>' +
       metricsHtml(dev) + noteHtml(dev) + '</article>';
   }
 
@@ -297,21 +310,87 @@
     } finally {
       inflight = false;
       setSpin(false);
+      // Resume yang datang saat request berjalan jangan sampai hilang.
+      if (resumeQueued) { resumeQueued = false; resumeCycle(); }
     }
     renderAll();
   }
 
+  /* Segarkan satu perangkat via POST /refresh {ip}. */
+  async function refreshIp(ip, triggerEl) {
+    var card = triggerEl ? triggerEl.closest('.card') : null;
+    if (card) card.classList.add('refreshing');
+    try {
+      var res = await api.refreshIp(ip);
+      var dev = findDev(ip);
+      if (dev && res && typeof res === 'object') {
+        Object.keys(res).forEach(function (k) { dev[k] = res[k]; });
+        dev.ip = ip;
+      }
+      renderAll();
+      toast('Diperbarui: ' + ip);
+    } catch (e) {
+      var msg = L.errorMessage(e);
+      if (/404|not_found/i.test(msg)) {
+        toast('Router merespons 404 untuk ' + ip + ', segarkan semua.');
+        refresh(false);
+      } else {
+        toast('Gagal segarkan ' + ip + ': ' + msg, true);
+      }
+    } finally {
+      if (card) card.classList.remove('refreshing');
+    }
+  }
+
   function startPolling() {
     stopPolling();
-    var sec = Number(state.settings.interval) || 30;
-    timer = setInterval(function () { if (!document.hidden) refresh(false); }, sec * 1000);
+    if (Date.now() >= fastEnd) {
+      var sec = Number(state.settings.interval) || 30;
+      timer = setInterval(function () { if (!document.hidden) refresh(false); }, sec * 1000);
+    }
   }
   function stopPolling() { if (timer) { clearInterval(timer); timer = null; } }
+  function startFastPolling() {
+    if (Date.now() >= fastEnd) return;
+    if (fastTimer) { clearInterval(fastTimer); fastTimer = null; }
+    fastTimer = setInterval(function () {
+      if (document.hidden) return;
+      if (Date.now() >= fastEnd) {
+        clearInterval(fastTimer); fastTimer = null;
+        startPolling();
+        return;
+      }
+      refresh(false);
+    }, 5000);
+  }
+  function resumeCycle() {
+    if (inflight) { resumeQueued = true; return; }
+    if (!configured() || document.hidden) return;
+    stopPolling();
+    fastEnd = Date.now() + 60000;
+    refresh(false);
+    startFastPolling();
+  }
 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) return;
-    if (Date.now() - state.fetchedAt > 5000) refresh(false);
+    if (Date.now() - state.fetchedAt > 5000) resumeCycle();
   });
+  window.addEventListener('focus', function () {
+    if (!document.hidden && Date.now() - state.fetchedAt > 5000) resumeCycle();
+  });
+  window.addEventListener('pageshow', function () {
+    if (!document.hidden && Date.now() - state.fetchedAt > 5000) resumeCycle();
+  });
+  // Native app resume via @capacitor/app; fallback DOM events di atas.
+  try {
+    var C = window.Capacitor;
+    if (C && C.Plugins && C.Plugins.App) {
+      C.Plugins.App.addListener('appStateChange', function (info) {
+        if (info && info.isActive) resumeCycle();
+      });
+    }
+  } catch (e) { /* @capacitor/app tidak tersedia di web, fallback DOM di atas */ }
 
   /* ---------- detail perangkat ---------- */
 
@@ -396,6 +475,10 @@
   }
 
   $('#dReload').addEventListener('click', loadDetail);
+  $('#dRefreshIp').addEventListener('click', function (e) {
+    var ip = state.detailIp;
+    if (ip) refreshIp(ip, e.currentTarget);
+  });
 
   $('#dDelete').addEventListener('click', async function () {
     var ip = state.detailIp;
@@ -413,6 +496,12 @@
   });
 
   $('#list').addEventListener('click', function (e) {
+    var rbtn = e.target.closest ? e.target.closest('[data-refresh-ip]') : null;
+    if (rbtn) {
+      e.stopPropagation();
+      refreshIp(rbtn.getAttribute('data-refresh-ip'), rbtn);
+      return;
+    }
     var card = e.target.closest ? e.target.closest('.card') : null;
     if (card) openDetail(card.getAttribute('data-ip'));
   });
