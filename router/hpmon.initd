@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+USE_PROCD=1
+START=99
+
+start_service() {
+    # Tambahkan ADB server saat boot agar Android target siap dicoba oleh daemon.
+    adb start-server >/dev/null 2>&1 &
+
+    procd_open_instance
+    procd_set_param command /root/hpmon/hpmon-daemon-v2.sh
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param term_timeout 15
+    procd_set_param respawn 3600 5 0
+    procd_close_instance
+}
+
+stop_service() {
+    return 0
+}
