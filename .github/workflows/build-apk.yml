@@ -1,0 +1,79 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'router/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # perlu untuk membuat Release saat ada tag v*
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Pasang dependensi
+        run: npm install
+
+      - name: Uji logika dan sintaks
+        run: |
+          npm test
+          npm run check
+
+      - name: Buat proyek Android (android/ tidak di-commit)
+        run: npx cap add android
+
+      - name: Patch proyek Android (cleartext, tanda tangan, versi)
+        env:
+          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: node scripts/patch-android.js
+
+      - name: Sinkronkan aset web
+        run: npx cap sync android
+
+      - name: Build APK rilis
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Namai APK
+        id: apk
+        run: |
+          VER="$(grep -oP "APP_VERSION = '\K[^']+" www/version.js)"
+          OUT="adbwifi-monitor-${VER}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$OUT"
+          echo "file=$OUT" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adbwifi-monitor-apk
+          path: ${{ steps.apk.outputs.file }}
+          if-no-files-found: error
+
+      - name: Rilis di GitHub (hanya untuk tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.file }}
+          generate_release_notes: true

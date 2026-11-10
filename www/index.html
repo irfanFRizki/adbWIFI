@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f12">
+<title>ADB WiFi Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><span class="pulse" id="pulse"></span><h1>ADB WiFi Monitor</h1></div>
+  <div class="top-actions">
+    <button class="icon-btn" id="btnRefresh" aria-label="Segarkan">&#8635;</button>
+    <button class="icon-btn" id="btnSettings" aria-label="Pengaturan">&#9881;</button>
+  </div>
+</header>
+
+<div id="banner" class="banner hidden" role="status"></div>
+<section id="summary" class="summary"></section>
+<main id="list" class="list"></main>
+
+<button class="fab" id="fab" aria-label="Tambah IP">+</button>
+
+<!-- Detail perangkat -->
+<div id="layerDetail" class="layer hidden">
+  <div class="scrim" data-close></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="dTitle">
+    <div class="sheet-head">
+      <div><h2 id="dTitle"></h2><p class="mono sub" id="dSub"></p></div>
+      <button class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
+    </div>
+    <div id="dBody" class="sheet-body"></div>
+    <div class="sheet-foot">
+      <button class="btn ghost" id="dReload">Muat ulang detail</button>
+      <button class="btn danger" id="dDelete">Hapus target</button>
+    </div>
+  </section>
+</div>
+
+<!-- Tambah IP -->
+<div id="layerAdd" class="layer hidden">
+  <div class="scrim" data-close></div>
+  <form class="sheet" id="formAdd" autocomplete="off" novalidate>
+    <div class="sheet-head">
+      <div><h2>Tambah IP yang dipantau</h2><p class="sub">HP harus sudah ada di jaringan router.</p></div>
+      <button type="button" class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
+    </div>
+    <div class="sheet-body">
+      <label class="field"><span>Alamat IP</span>
+        <input id="addIp" inputmode="decimal" placeholder="192.168.7.188" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>Nama</span>
+        <input id="addNama" placeholder="HP-188" maxlength="40"></label>
+      <label class="field"><span>Port ADB</span>
+        <input id="addPort" inputmode="numeric" value="5555"></label>
+      <p class="hint">Android 11+: pakai port dari layar <b>Wireless Debugging</b> (bukan port pairing). Android 10 ke bawah: 5555 setelah <span class="mono">adb tcpip 5555</span>.</p>
+      <p class="form-error hidden" id="addError"></p>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" class="btn ghost" data-close>Batal</button>
+      <button type="submit" class="btn primary" id="addSubmit">Tambah</button>
+    </div>
+  </form>
+</div>
+
+<!-- Pengaturan -->
+<div id="layerSettings" class="layer hidden">
+  <div class="scrim" data-close></div>
+  <form class="sheet" id="formSettings" autocomplete="off" novalidate>
+    <div class="sheet-head">
+      <div><h2>Pengaturan</h2><p class="sub mono" id="verLabel"></p></div>
+      <button type="button" class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
+    </div>
+    <div class="sheet-body">
+      <label class="field"><span>URL API utama (LAN)</span>
+        <input id="setUrl1" placeholder="192.168.7.1" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>URL cadangan (mis. Tailscale), opsional</span>
+        <input id="setUrl2" placeholder="alamat Tailscale router" autocapitalize="off" spellcheck="false"></label>
+      <p class="hint">Cukup isi alamat IP; jalur <span class="mono">/cgi-bin/hpmon/index.sh</span> ditambahkan otomatis. URL cadangan dipakai bila URL utama tidak terjangkau.</p>
+      <label class="field"><span>Token API</span>
+        <div class="row"><input id="setToken" type="password" autocapitalize="off" spellcheck="false">
+        <button type="button" class="btn ghost small" id="tokenToggle">Lihat</button></div></label>
+      <label class="field"><span>Segarkan otomatis</span>
+        <select id="setInterval">
+          <option value="15">Tiap 15 detik</option>
+          <option value="30">Tiap 30 detik</option>
+          <option value="60">Tiap 60 detik</option>
+        </select></label>
+      <p class="hint">Router memperbarui data tiap ±60 detik, jadi interval di bawah itu hanya mempercepat pembaruan tampilan.</p>
+      <p class="form-error hidden" id="setMsg"></p>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" class="btn ghost" id="setTest">Tes koneksi</button>
+      <button type="submit" class="btn primary">Simpan</button>
+    </div>
+  </form>
+</div>
+
+<div id="toast" class="toast hidden" role="status"></div>
+
+<script src="version.js"></script>
+<script src="lib.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

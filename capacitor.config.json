@@ -1,0 +1,17 @@
+{
+  "appId": "com.irfanfrizki.adbwifi",
+  "appName": "ADB WiFi Monitor",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
