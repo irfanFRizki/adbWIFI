@@ -76,6 +76,23 @@ else
               # CPU: read /proc/stat twice with 1s sleep, single adb call
               STAT=$(adb_t "$ADB_ADDR" 'head -1 /proc/stat; sleep 1; head -1 /proc/stat' 2>/dev/null)
               CPU_PCT="null"
+              # Foreground app: mCurrentFocus via dumpsys window (null if screen off/locked/unreadable)
+              FG_APP="null"
+              FG_LABEL="null"
+              FG_LINE=$(adb_t "$ADB_ADDR" dumpsys window 2>/dev/null | grep mCurrentFocus | head -1 | tr -d '\r')
+              if [ -n "$FG_LINE" ]; then
+                FG_PKG=$(printf '%s\n' "$FG_LINE" | sed -n 's/.* u[0-9][0-9]* \([^ /}][^ /}]*\)\/.*/\1/p')
+                [ -z "$FG_PKG" ] && FG_PKG=$(printf '%s\n' "$FG_LINE" | sed -n 's/.* \([^ /}][^ /}]*\)\/.*/\1/p')
+                if [ -n "$FG_PKG" ] && [ "$FG_PKG" != "null" ]; then
+                  FG_APP="\"$FG_PKG\""
+                  if [ -f "/etc/hpmon/app-labels.json" ]; then
+                    LBL=$(jq -r --arg p "$FG_PKG" '.[$p] // empty' /etc/hpmon/app-labels.json 2>/dev/null)
+                    [ -n "$LBL" ] && FG_LABEL="\"$LBL\"" || FG_LABEL="null"
+                  else
+                    FG_LABEL="null"
+                  fi
+                fi
+              fi
               if [ -n "$STAT" ]; then
                 L1=$(printf '%s\n' "$STAT" | sed -n '1p')
                 L2=$(printf '%s\n' "$STAT" | sed -n '2p')
@@ -90,7 +107,7 @@ else
                   fi
                 fi
               fi
-              BODY=$(printf '%s' "$DEV" | jq -c --argjson apps "$APPS" --arg ram_total "${RAM_TOTAL:-0}" --arg ram_avail "${RAM_AVAIL:-0}" --arg cpu_pct "$CPU_PCT" '. + {detail: {apps: $apps, ram: {total_kb: ($ram_total|tonumber), available_kb: ($ram_avail|tonumber)}, cpu_percent: (if $cpu_pct=="null" then null else ($cpu_pct|tonumber) end)}}')
+              BODY=$(printf '%s' "$DEV" | jq -c --argjson apps "$APPS" --arg ram_total "${RAM_TOTAL:-0}" --arg ram_avail "${RAM_AVAIL:-0}" --arg cpu_pct "$CPU_PCT" --argjson fg_app "$FG_APP" --argjson fg_label "$FG_LABEL" '. + {detail: {apps: $apps, ram: {total_kb: ($ram_total|tonumber), available_kb: ($ram_avail|tonumber)}, cpu_percent: (if $cpu_pct=="null" then null else ($cpu_pct|tonumber) end), foreground_app: {package: $fg_app, label: $fg_label}}}')
             else
               BODY=$(printf '%s' "$DEV" | jq -c '. + {detail: null}')
             fi

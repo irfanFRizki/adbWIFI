@@ -29,22 +29,30 @@ if [ "$AGE" -gt "$MAX_CACHE_AGE" ]; then
   exit 0
 fi
 
-# --- 2. Cek CGI balas JSON valid ---
+# --- 2. Cek CGI balas JSON valid (port 80 dan port khusus 8091) ---
 TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null)
 if [ -z "$TOKEN" ]; then
   logger -t hpmon-watchdog "token file missing; skipping CGI check"
   exit 0
 fi
 RESP=$(curl -s -m "$CGI_TIMEOUT" -H "Authorization: Bearer $TOKEN" "$CGI_URL" 2>/dev/null || true)
-if [ -z "$RESP" ]; then
-  logger -t hpmon-watchdog "CGI no response within ${CGI_TIMEOUT}s; restarting hpmon"
+if [ -z "$RESP" ] || ! printf '%s' "$RESP" | jq -e . >/dev/null 2>&1; then
+  logger -t hpmon-watchdog "CGI :80 not responding / invalid JSON; restarting hpmon"
   /etc/init.d/hpmon restart 2>/dev/null || true
   exit 0
 fi
-if ! printf '%s' "$RESP" | jq -e . >/dev/null 2>&1; then
-  logger -t hpmon-watchdog "CGI response not valid JSON; restarting hpmon"
-  /etc/init.d/hpmon restart 2>/dev/null || true
-  exit 0
+
+# Cek uhttpd hpmon (port 8091)
+RESP_8091=$(curl -s -m "$CGI_TIMEOUT" -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8091/cgi-bin/hpmon/index.sh/status" 2>/dev/null || true)
+if [ -z "$RESP_8091" ] || ! printf '%s' "$RESP_8091" | jq -e . >/dev/null 2>&1; then
+  logger -t hpmon-watchdog "hpmon-uhttpd :8091 not responding; restarting hpmon-uhttpd"
+  /etc/init.d/hpmon-uhttpd restart 2>/dev/null || true
+fi
+
+# Cek cloudflared proses berjalan
+if ! pgrep -f "cloudflared" >/dev/null 2>&1; then
+  logger -t hpmon-watchdog "cloudflared process down; restarting cloudflared"
+  /etc/init.d/cloudflared restart 2>/dev/null || true
 fi
 
 # --- 3. Cek adb hang (non-blocking, bounded) ---

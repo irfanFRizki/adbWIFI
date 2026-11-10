@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+USE_PROCD=1
+START=99
+STOP=10
+
+start_service() {
+    # Dedicated hpmon-only uhttpd on 8091, bound to LAN/Tailscale/loopback only (no 0.0.0.0).
+    # Serves only /cgi-bin/hpmon; no LuCI, no ubus. Directory listing off; 404 handler for others.
+    local lan="192.168.7.1"
+    local ts
+    ts=$(ip -4 addr show tailscale0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
+    procd_open_instance
+    procd_set_param command /usr/sbin/uhttpd -f -h /root/hpmon/www-public -x /cgi-bin -D -E /cgi-bin/hpmon/404.sh -p ${lan}:8091 -p 127.0.0.1:8091
+    if [ -n "$ts" ]; then
+        procd_append_param command -p ${ts}:8091
+    fi
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+stop_service() {
+    return 0
+}

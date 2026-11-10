@@ -59,6 +59,43 @@ get_adb_rxtx() {
   printf '"rx_bytes":null,"tx_bytes":null,"rxtx_source":null,"rxtx_ts":null,"rxtx_available":false'
 }
 
+# Resolve hostname for IP (refreshed each cycle). Returns "hostname|source" or "null|"
+# Sources: static_lease (uci dhcp @host), domain_record (uci dhcp @domain or /etc/hosts), dhcp_leases (/tmp/dhcp.leases)
+get_hostname_for_ip() {
+  local ip="$1" hn="" src=""
+  # (1) static lease uci show dhcp (host.name)
+  local sec
+  for sec in $(uci show dhcp 2>/dev/null | sed -n 's/^dhcp\.@host\[\([0-9]*\)\]=host/\1/p'); do
+    local hip hname
+    hip=$(uci -q get dhcp.@host[$sec].ip 2>/dev/null)
+    hname=$(uci -q get dhcp.@host[$sec].name 2>/dev/null)
+    if [ "$hip" = "$ip" ] && [ -n "$hname" ]; then hn="$hname"; src="static_lease"; break; fi
+  done
+  # (2) domain record uci dhcp.@domain and /etc/hosts
+  if [ -z "$hn" ]; then
+    for sec in $(uci show dhcp 2>/dev/null | sed -n 's/^dhcp\.@domain\[\([0-9]*\)\]=domain/\1/p'); do
+      local dip dname
+      dip=$(uci -q get dhcp.@domain[$sec].ip 2>/dev/null)
+      dname=$(uci -q get dhcp.@domain[$sec].name 2>/dev/null)
+      if [ "$dip" = "$ip" ] && [ -n "$dname" ]; then hn="$dname"; src="domain_record"; break; fi
+    done
+  fi
+  if [ -z "$hn" ] && [ -f /etc/hosts ]; then
+    hn=$(awk -v ip="$ip" '$1==ip {print $2; exit}' /etc/hosts 2>/dev/null)
+    [ -n "$hn" ] && src="hosts"
+  fi
+  # (3) /tmp/dhcp.leases (expiry mac ip hostname clientid)
+  if [ -z "$hn" ] && [ -f /tmp/dhcp.leases ]; then
+    hn=$(awk -v ip="$ip" '$3==ip && $4!="*" {print $4; exit}' /tmp/dhcp.leases 2>/dev/null)
+    [ -n "$hn" ] && src="dhcp_leases"
+  fi
+  if [ -n "$hn" ]; then
+    printf '%s|%s' "$hn" "$src"
+  else
+    printf 'null|'
+  fi
+}
+
 # Get router-side data for an IP (non-blocking-ish; ping timeout 1s)
 get_router_data() {
   local ip="$1"
@@ -82,6 +119,41 @@ get_router_data() {
     "$online" "$latency" "$mac" "${conns:-0}"
 }
 
+# Battery history and extended fields (Fase B)
+BATTERY_HIST="/tmp/hpmon_battery_hist"
+APP_LABELS="/etc/hpmon/app-labels.json"
+
+# Update battery history and compute avg_drain_pct_per_hour (3h window, samples >=30min apart)
+# Args: ip level charging_bool now_ts
+# Prints: avg_drain_pct_per_hour (number or null)
+compute_avg_drain() {
+  local ip="$1" level="$2" charging="$3" now="$4"
+  local hist="$BATTERY_HIST"
+  [ -f "$hist" ] || touch "$hist"
+  # append if level is numeric
+  if echo "$level" | grep -qE '^[0-9]+$'; then
+    printf '%s\t%s\t%s\t%s\n' "$ip" "$now" "$level" "$charging" >> "$hist"
+  fi
+  # prune >6h
+  local tmpf=$(mktemp)
+  awk -v now="$now" -v ip="$ip" '{if (now - $2 <= 21600) print $0}' "$hist" > "$tmpf" 2>/dev/null && mv "$tmpf" "$hist"
+  # compute from last 3h, non-charging samples only
+  awk -v ip="$ip" -v now="$now" '
+    $1==ip && (now-$2)<=10800 && $4=="false" && $3 ~ /^[0-9]+$/ { t[++n]=$2; l[n]=$3 }
+    END {
+      if (n < 2) { print "null"; exit }
+      # find oldest and newest with >=30min span
+      min_i=1; max_i=1
+      for(i=1;i<=n;i++){ if(t[i]<t[min_i]) min_i=i; if(t[i]>t[max_i]) max_i=i }
+      span = t[max_i]-t[min_i]
+      if (span < 1800) { print "null"; exit }
+      drop = l[min_i]-l[max_i]
+      if (drop <= 0) { print "null"; exit }
+      hours = span/3600.0
+      printf "%.2f", drop/hours
+    }' "$hist" 2>/dev/null || echo "null"
+}
+
 # Get ADB data for a device with auto-detect and reconnect (non-blocking pada unreachable:
 # adb connect dibatasi ADB_TIMEOUT). Port ADB TIDAK diubah logikanya; hanya auto-update
 # targets.json bila device terdeteksi di port berbeda (perilaku v2 yang ada).
@@ -100,6 +172,10 @@ get_adb_data() {
   local screen=""
   local uptime=""
   local dev_entry found_state dev_state any_entry any_port apid
+  # Fase B extras
+  local charging="null" charge_source="null" temp_c="null" voltage_mv="null"
+  local current_ma="null" current_available="false" avg_drain_pct_per_hour="null"
+  local fg_pkg="null" fg_label="null"
 
   # Cari entri ip:port aktif di `adb devices -l`
   dev_entry=$(adb devices -l 2>/dev/null | grep "^${ip}:" | head -1)
@@ -155,7 +231,39 @@ get_adb_data() {
   fi
 
   if [ "$adb_status" = "connected" ]; then
-    battery=$(adb_run "$addr" dumpsys battery 2>/dev/null | grep level | awk '{print $2}' | tr -d '\r')
+    # single dumpsys battery for level + extended fields
+    bat_dump=$(adb_run "$addr" dumpsys battery 2>/dev/null | tr -d '\r')
+    battery=$(printf '%s\n' "$bat_dump" | awk '/^[[:space:]]*level:/{print $2; exit}')
+    local ac_p usb_p wl_p btemp bvolt
+    ac_p=$(printf '%s\n' "$bat_dump" | awk '/^[[:space:]]*AC powered:/{print $3; exit}')
+    usb_p=$(printf '%s\n' "$bat_dump" | awk '/^[[:space:]]*USB powered:/{print $3; exit}')
+    wl_p=$(printf '%s\n' "$bat_dump" | awk '/^[[:space:]]*Wireless powered:/{print $3; exit}')
+    btemp=$(printf '%s\n' "$bat_dump" | awk '/^[[:space:]]*temperature:/{print $2; exit}')
+    bvolt=$(printf '%s\n' "$bat_dump" | awk '/^[[:space:]]*voltage:/{print $2; exit}')
+    if [ "$ac_p" = "true" ] || [ "$usb_p" = "true" ] || [ "$wl_p" = "true" ]; then
+      charging="true"
+    elif [ "$ac_p" = "false" ] || [ "$usb_p" = "false" ]; then
+      charging="false"
+    fi
+    if [ "$ac_p" = "true" ]; then charge_source="\"ac\""
+    elif [ "$usb_p" = "true" ]; then charge_source="\"usb\""
+    elif [ "$wl_p" = "true" ]; then charge_source="\"wireless\""
+    else charge_source="null"; fi
+    if echo "$btemp" | grep -qE '^-?[0-9]+$'; then temp_c=$(awk "BEGIN{printf \"%.1f\", $btemp/10}"); else temp_c="null"; fi
+    if echo "$bvolt" | grep -qE '^[0-9]+$'; then voltage_mv="$bvolt"; else voltage_mv="null"; fi
+    # current_now: µA -> mA, keep sign. Konvensi: + mengisi, - dipakai (umum di banyak kernel; nilai mentah dipertahankan arahnya).
+    local cnow
+    cnow=$(adb_run "$addr" cat /sys/class/power_supply/battery/current_now 2>/dev/null | tr -d '\r\n')
+    if echo "$cnow" | grep -qE '^-?[0-9]+$'; then
+      current_ma=$(awk "BEGIN{printf \"%.3f\", $cnow/1000}")
+      current_available="true"
+    else
+      current_ma="null"; current_available="false"
+    fi
+    # avg drain
+    local now_ts; now_ts=$(date +%s)
+    avg_drain_pct_per_hour=$(compute_avg_drain "$ip" "$battery" "$charging" "$now_ts")
+
     model=$(adb_run "$addr" getprop ro.product.model 2>/dev/null | tr -d '\r\n')
     android=$(adb_run "$addr" getprop ro.build.version.release 2>/dev/null | tr -d '\r\n')
     screen=$(adb_run "$addr" dumpsys power 2>/dev/null | grep "mWakefulness=" | awk -F'=' '{print $2}' | tr -d '\r\n')
@@ -169,14 +277,44 @@ get_adb_data() {
     else
       wifi_rssi="null"
     fi
+
+    # foreground app from mCurrentFocus (null if screen off/locked/unreadable)
+    if [ "$screen" != "Awake" ]; then
+      fg_pkg="null"; fg_label="null"
+    else
+      local focus_line pkg_raw
+      focus_line=$(adb_run "$addr" dumpsys window 2>/dev/null | grep mCurrentFocus | head -1 | tr -d '\r')
+      # format: mCurrentFocus=Window{... u0 com.pkg/com.pkg.Activity}
+      pkg_raw=$(printf '%s\n' "$focus_line" | sed -n 's/.* u[0-9][0-9]* \([^ /}][^ /}]*\)\/.*/\1/p')
+      if [ -z "$pkg_raw" ]; then
+        pkg_raw=$(printf '%s\n' "$focus_line" | sed -n 's/.* \([^ /}][^ /}]*\)\/.*/\1/p')
+      fi
+      if [ -n "$pkg_raw" ] && [ "$pkg_raw" != "null" ]; then
+        fg_pkg="\"$pkg_raw\""
+        if [ -f "$APP_LABELS" ]; then
+          local lbl
+          lbl=$(jq -r --arg p "$pkg_raw" '.[$p] // empty' "$APP_LABELS" 2>/dev/null)
+          if [ -n "$lbl" ]; then fg_label="\"$lbl\""; else fg_label="null"; fi
+        else
+          fg_label="null"
+        fi
+      else
+        fg_pkg="null"; fg_label="null"
+      fi
+    fi
   fi
 
   printf '{"status":"%s"' "$adb_status"
   [ -n "$adb_error" ] && printf ',"error":"%s"' "$adb_error"
   [ -n "$detected_port" ] && printf ',"port_terdeteksi":%s' "$detected_port"
   if [ "$adb_status" = "connected" ]; then
+    # existing fields preserved
     printf ',"battery":"%s","model":"%s","android":"%s","screen":"%s","uptime":%s,"wifi_ssid":"%s","wifi_rssi":%s' \
       "${battery:-}" "${model:-}" "${android:-}" "${screen:-}" "${uptime:-0}" "${wifi_ssid:-}" "${wifi_rssi:-null}"
+    # Fase B new fields in adb object
+    printf ',"charging":%s,"charge_source":%s,"temp_c":%s,"voltage_mv":%s,"current_ma":%s,"current_available":%s,"avg_drain_pct_per_hour":%s' \
+      "$charging" "$charge_source" "$temp_c" "$voltage_mv" "$current_ma" "$current_available" "$avg_drain_pct_per_hour"
+    printf ',"foreground_app":{"package":%s,"label":%s}' "$fg_pkg" "$fg_label"
   fi
   printf '}'
 }
@@ -205,6 +343,9 @@ update_cache() {
 
     router_data=$(get_router_data "$ip")
     adb_data=$(get_adb_data "$ip" "$port")
+    hn_info=$(get_hostname_for_ip "$ip")
+    hostname_val=$(printf '%s' "$hn_info" | cut -d'|' -f1)
+    hostname_src=$(printf '%s' "$hn_info" | cut -d'|' -f2-)
 
     # rxtx level device: hanya bila ADB connected. Unreachable TIDAK blocking siklus.
     adb_status=$(printf '%s' "$adb_data" | jq -r '.status' 2>/dev/null)
@@ -217,7 +358,7 @@ update_cache() {
       rxtx_data='"rx_bytes":null,"tx_bytes":null,"rxtx_source":null,"rxtx_ts":null,"rxtx_available":false'
     fi
 
-    result="${result}{\"ip\":\"$ip\",\"nama\":\"$nama\",\"port_adb\":$port,\"router\":$router_data,\"adb\":$adb_data,${rxtx_data}}"
+    if [ "$hostname_val" = "null" ]; then hn_json="null"; else hn_json="\"$hostname_val\""; fi; result="${result}{\"ip\":\"$ip\",\"nama\":\"$nama\",\"hostname\":$hn_json,\"port_adb\":$port,\"router\":$router_data,\"adb\":$adb_data,${rxtx_data}}"
     i=$((i+1))
   done
 
