@@ -1,5 +1,9 @@
 # adbWIFI — ADB WiFi Monitor
 
+**Current version: 0.4.0 — Midnight Pro 2.0** (release preparation; not yet published)
+
+See [CHANGELOG.md](CHANGELOG.md) for changes.
+
 Aplikasi Android untuk memantau HP yang terhubung ke WiFi router **OpenWrt**. Router menjalankan layanan **hpmon** (ping, ARP, dan ADB ke tiap HP), lalu aplikasi membaca hasilnya lewat API HTTP/JSON.
 
 ```

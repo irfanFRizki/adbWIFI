@@ -3,120 +3,222 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#080b18">
+<meta name="theme-color" content="#080D1C">
 <meta name="color-scheme" content="dark">
 <meta name="description" content="Monitor perangkat Android melalui Wireless ADB dan jaringan WiFi.">
 <link rel="icon" type="image/svg+xml" href="assets/adbwifi-favicon.svg">
-<title>ADB WiFi Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<title>adbWIFI — Device Monitor</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="startup-splash" id="startupSplash" aria-label="Memulai adbWIFI"><div class="splash-content"><img class="splash-mark" src="assets/adbwifi-mark.svg" alt=""><div class="splash-name">adb<span>WIFI</span></div><div class="splash-caption">DEVICE MONITOR</div><div class="splash-loader"></div></div></div>
 
-<header class="top">
-  <div class="brand"><img class="brand-mark" src="assets/adbwifi-mark.svg" alt="" width="38" height="38"><div><h1>adbWIFI</h1><span class="brand-sub">DEVICE MONITOR</span></div><span class="pulse" id="pulse" aria-label="Status koneksi"></span></div>
-  <div class="top-actions">
-    <button class="icon-btn" id="btnRefresh" aria-label="Segarkan">&#8635;</button>
-    <button class="icon-btn" id="btnSettings" aria-label="Pengaturan">&#9881;</button>
+<!-- ============ Splash ============ -->
+<div class="splash" id="splash" aria-label="Memulai adbWIFI">
+  <div class="splash-content">
+    <img class="splash-mark" src="assets/adbwifi-mark.svg" alt="">
+    <div class="splash-name">adb<span>WIFI</span></div>
+    <div class="splash-caption">Device Monitor</div>
+    <div class="splash-loader"></div>
   </div>
-</header>
-
-<div id="banner" class="banner hidden" role="status"></div>
-<section id="summary" class="summary"></section>
-<main id="list" class="list"></main>
-
-<button class="fab" id="fab" aria-label="Tambah IP">+</button>
-
-<!-- Detail perangkat -->
-<div id="layerDetail" class="layer hidden">
-  <div class="scrim" data-close></div>
-  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="dTitle">
-    <div class="sheet-head">
-      <div><h2 id="dTitle"></h2><p class="mono sub" id="dSub"></p></div>
-      <button class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
-    </div>
-    <div id="dBody" class="sheet-body"></div>
-    <div class="sheet-foot">
-      <button class="btn ghost" id="dReload">Muat ulang detail</button>
-      <button class="btn" id="dRefreshIp">Segarkan IP ini</button>
-      <button class="btn danger" id="dDelete">Hapus target</button>
-    </div>
-  </section>
 </div>
 
-<!-- Tambah IP -->
-<div id="layerAdd" class="layer hidden">
-  <div class="scrim" data-close></div>
-  <form class="sheet" id="formAdd" autocomplete="off" novalidate>
-    <div class="sheet-head">
-      <div><h2>Tambah IP yang dipantau</h2><p class="sub">HP harus sudah ada di jaringan router.</p></div>
-      <button type="button" class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
+<!-- ============ SVG icon sprite (one outline family, consistent stroke) ============ -->
+<svg style="display:none" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+    <symbol id="i-devices" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M10.5 18.5h3"/></symbol>
+    <symbol id="i-apps" viewBox="0 0 24 24"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="M3 12l9 5 9-5"/><path d="M3 17l9 5 9-5"/></symbol>
+    <symbol id="i-logs" viewBox="0 0 24 24"><path d="M4 5h16M4 10h16M4 15h11M4 20h7"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
+    <symbol id="i-about" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="0.9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-battery" viewBox="0 0 24 24"><rect x="2" y="7" width="17" height="10" rx="2.5"/><path d="M21 10.5v3"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5a15 15 0 0 1 19 0"/><path d="M6 12.2a10 10 0 0 1 12 0"/><path d="M9.3 15.8a5 5 0 0 1 5.4 0"/><circle cx="12" cy="19" r="0.9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+    <symbol id="i-ram" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 17v3M12 17v3M18 17v3"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v13"/><path d="m7 12 5 5 5-5"/><path d="M4 21h16"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 20V7"/><path d="m7 11 5-5 5 5"/><path d="M4 4h16"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5 21.5 20h-19L12 3.5Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><circle cx="12" cy="8" r="0.9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M4 4l16 16"/><path d="M9.6 5.9A10 10 0 0 1 12 5.5c6.2 0 10 6.5 10 6.5a17 17 0 0 1-3.6 4.2"/><path d="M6.3 7.9A17 17 0 0 0 2 12s3.8 6.5 10 6.5c1.5 0 2.8-.4 4-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16v4Z"/><path d="m15 5 4 4"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></symbol>
+    <symbol id="i-thermometer" viewBox="0 0 24 24"><path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0Z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.3l3.4 2"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m14 7-5 5 5 5"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+  </defs>
+</svg>
+
+<!-- ============ App shell ============ -->
+<div class="app-shell" id="appShell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar" role="navigation" aria-label="Navigasi utama">
+    <div class="sidebar-header">
+      <img class="sidebar-logo" src="assets/adbwifi-mark.svg" alt="">
+      <div class="sidebar-title">adb<wbr>WIFI</div>
     </div>
-    <div class="sheet-body">
-      <label class="field"><span>Alamat IP</span>
-        <input id="addIp" inputmode="decimal" placeholder="192.168.7.188" autocapitalize="off" spellcheck="false"></label>
-      <label class="field"><span>Nama</span>
-        <input id="addNama" placeholder="HP-188" maxlength="40"></label>
-      <label class="field"><span>Port ADB</span>
-        <input id="addPort" inputmode="numeric" value="5555"></label>
-      <p class="hint">Android 11+: pakai port dari layar <b>Wireless Debugging</b> (bukan port pairing). Android 10 ke bawah: 5555 setelah <span class="mono">adb tcpip 5555</span>.</p>
-      <p class="form-error hidden" id="addError"></p>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-section-title">Monitor</div>
+        <button class="nav-item active" data-page="dashboard" type="button">
+          <svg class="nav-icon" aria-hidden="true"><use href="#i-dashboard"/></svg><span class="nav-label">Dashboard</span>
+        </button>
+        <button class="nav-item" data-page="devices" type="button">
+          <svg class="nav-icon" aria-hidden="true"><use href="#i-devices"/></svg><span class="nav-label">Perangkat</span>
+        </button>
+        <button class="nav-item" data-page="apps" type="button">
+          <svg class="nav-icon" aria-hidden="true"><use href="#i-apps"/></svg><span class="nav-label">Aplikasi</span>
+        </button>
+        <button class="nav-item" data-page="logs" type="button">
+          <svg class="nav-icon" aria-hidden="true"><use href="#i-logs"/></svg><span class="nav-label">Log Aktivitas</span>
+        </button>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">Sistem</div>
+        <button class="nav-item" data-page="settings" type="button">
+          <svg class="nav-icon" aria-hidden="true"><use href="#i-settings"/></svg><span class="nav-label">Pengaturan</span>
+        </button>
+        <button class="nav-item" data-page="about" type="button">
+          <svg class="nav-icon" aria-hidden="true"><use href="#i-about"/></svg><span class="nav-label">Tentang</span>
+        </button>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="device-status" id="sidebarStatus" style="font-size:var(--text-xs);color:var(--text-muted)">
+        <span class="badge-dot" style="background:var(--text-dim)"></span><span class="status-text">Belum terhubung</span>
+      </div>
     </div>
-    <div class="sheet-foot">
-      <button type="button" class="btn ghost" data-close>Batal</button>
-      <button type="submit" class="btn primary" id="addSubmit">Tambah</button>
+    <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Perkecil sidebar">
+      <svg width="14" height="14" aria-hidden="true"><use href="#i-chevron"/></svg>
+    </button>
+  </aside>
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <button class="menu-btn" id="menuBtn" type="button" aria-label="Buka navigasi">
+        <svg width="20" height="20" aria-hidden="true"><use href="#i-menu"/></svg>
+      </button>
+      <h1 class="page-title" id="pageTitle">Dashboard</h1>
+    </div>
+    <div class="header-right">
+      <span class="device-status" id="headerStatus" style="font-size:var(--text-xs);color:var(--text-muted);margin-right:var(--space-2)">
+        <span class="badge-dot"></span><span class="status-text">—</span>
+      </span>
+      <button class="header-icon-btn" id="btnRefresh" type="button" aria-label="Segarkan data" title="Segarkan data">
+        <svg width="20" height="20" aria-hidden="true"><use href="#i-refresh"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="main" id="main">
+    <div id="banner" class="banner hidden" role="status"></div>
+    <section class="page" id="page-dashboard"></section>
+    <section class="page hidden" id="page-devices"></section>
+    <section class="page hidden" id="page-apps"></section>
+    <section class="page hidden" id="page-logs"></section>
+    <section class="page hidden" id="page-settings"></section>
+    <section class="page hidden" id="page-about"></section>
+    <section class="page hidden" id="page-detail"></section>
+  </main>
+</div>
+
+<!-- ============ Modals ============ -->
+<div class="modal-backdrop" id="backdrop"></div>
+
+<!-- Add device -->
+<div class="modal" id="modalAdd" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+  <div class="modal-header">
+    <h2 class="modal-title" id="addTitle">Tambah perangkat</h2>
+    <button class="modal-close" type="button" data-close aria-label="Tutup">
+      <svg width="18" height="18" aria-hidden="true"><use href="#i-close"/></svg>
+    </button>
+  </div>
+  <form id="formAdd" autocomplete="off" novalidate style="display:flex;flex-direction:column;min-height:0;flex:1">
+    <div class="modal-body">
+      <div class="field" style="margin-bottom:var(--space-4)">
+        <label class="field-label" for="addIp">Alamat IP</label>
+        <input class="field-input mono" id="addIp" inputmode="decimal" placeholder="192.168.7.188" autocapitalize="off" spellcheck="false">
+      </div>
+      <div class="field" style="margin-bottom:var(--space-4)">
+        <label class="field-label" for="addNama">Nama</label>
+        <input class="field-input" id="addNama" placeholder="HP-188" maxlength="40">
+      </div>
+      <div class="field" style="margin-bottom:var(--space-4)">
+        <label class="field-label" for="addPort">Port ADB</label>
+        <input class="field-input mono" id="addPort" inputmode="numeric" value="5555">
+      </div>
+      <p class="field-hint">Android 11+: pakai port dari layar <b>Wireless Debugging</b> (bukan port pairing). Android 10 ke bawah: 5555 setelah <span class="mono">adb tcpip 5555</span>.</p>
+      <p class="field-error hidden" id="addError" role="alert"></p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" data-close>Batal</button>
+      <button type="submit" class="btn btn-primary" id="addSubmit">Tambah</button>
     </div>
   </form>
 </div>
 
-<!-- Pengaturan -->
-<div id="layerSettings" class="layer hidden">
-  <div class="scrim" data-close></div>
-  <form class="sheet" id="formSettings" autocomplete="off" novalidate>
-    <div class="sheet-head">
-      <div><h2>Pengaturan</h2><p class="sub mono" id="verLabel"></p></div>
-      <button type="button" class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
-    </div>
-    <div class="sheet-body">
-      <label class="field"><span>URL 1 — LAN (utama)</span>
-        <input id="setUrl1" placeholder="192.168.7.1:8091" autocapitalize="off" spellcheck="false"></label>
-      <label class="field"><span>URL 2 — Tailscale (opsional)</span>
-        <input id="setUrl2" placeholder="alamat Tailscale router:8091" autocapitalize="off" spellcheck="false"></label>
-      <label class="field"><span>URL 3 — Cloudflare (opsional)</span>
-        <input id="setUrl3" placeholder="https://hpmon.domainmu.my.id" autocapitalize="off" spellcheck="false"></label>
-      <p class="hint">Cukup isi alamat (IP:port atau domain); jalur <span class="mono">/cgi-bin/hpmon/index.sh</span> ditambahkan otomatis. Aplikasi memakai URL yang terakhir berhasil lebih dulu, lalu mencoba yang lain bila tidak terjangkau.</p>
-      <label class="field"><span>Token API</span>
-        <div class="row"><input id="setToken" type="password" autocapitalize="off" spellcheck="false">
-        <button type="button" class="btn ghost small" id="tokenToggle">Lihat</button></div></label>
-      <label class="field"><span>Kunci Cloudflare (opsional)</span>
-        <input id="setCfKey" type="password" autocapitalize="off" spellcheck="false" autocomplete="new-password"></label>
-      <label class="field"><span>Segarkan otomatis</span>
-        <select id="setInterval">
-          <option value="10">Tiap 10 detik</option>
-          <option value="15">Tiap 15 detik</option>
-          <option value="30">Tiap 30 detik</option>
-          <option value="60">Tiap 60 detik</option>
-        </select></label>
-      <p class="hint">Router memperbarui data tiap ±60 detik, jadi interval di bawah itu hanya mempercepat pembaruan tampilan.</p>
-      <p class="form-error hidden" id="setMsg"></p>
-    </div>
-    <div class="sheet-foot">
-      <button type="button" class="btn ghost" id="setTest">Tes koneksi</button>
-      <button type="submit" class="btn primary">Simpan</button>
-    </div>
-  </form>
+<!-- Confirm dialog -->
+<div class="modal" id="modalConfirm" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="modal-header">
+    <h2 class="modal-title" id="confirmTitle">Konfirmasi</h2>
+  </div>
+  <div class="modal-body">
+    <p id="confirmText" style="color:var(--text-muted);line-height:var(--leading-relaxed)"></p>
+    <p class="field-error hidden" id="confirmError" role="alert"></p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-ghost" id="confirmCancel">Batal</button>
+    <button type="button" class="btn btn-danger" id="confirmOk">Hapus</button>
+  </div>
 </div>
 
-<div id="toast" class="toast hidden" role="status"></div>
+<!-- Device detail modal (applications + quick view) -->
+<div class="modal" id="modalApps" role="dialog" aria-modal="true" aria-labelledby="appsTitle">
+  <div class="modal-header">
+    <div>
+      <h2 class="modal-title" id="appsTitle">Aplikasi</h2>
+      <p class="card-subtitle" id="appsSub"></p>
+    </div>
+    <button class="modal-close" type="button" data-close aria-label="Tutup">
+      <svg width="18" height="18" aria-hidden="true"><use href="#i-close"/></svg>
+    </button>
+  </div>
+  <div class="modal-body">
+    <div class="field" style="margin-bottom:var(--space-3)">
+      <input class="field-input mono" id="modalAppSearch" placeholder="Cari nama paket" autocapitalize="off" spellcheck="false">
+    </div>
+    <p class="field-hint" id="modalAppCount" style="margin-bottom:var(--space-2)"></p>
+    <div class="apps-list" id="modalAppsList"></div>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div class="toast-container" id="toastContainer" role="status" aria-live="polite"></div>
 
 <script src="version.js"></script>
 <script src="lib.js"></script>
 <script src="app.js"></script>
 <script>
-(function(){var s=document.getElementById("startupSplash");function hide(){if(!s)return;s.classList.add("leaving");window.setTimeout(function(){if(s&&s.parentNode)s.parentNode.removeChild(s);},500);}window.addEventListener("load",function(){window.setTimeout(hide,650);},{once:true});window.setTimeout(hide,3500);})();
+(function () {
+  var s = document.getElementById('splash');
+  function hide() { if (!s) return; s.classList.add('hidden'); window.setTimeout(function () { if (s && s.parentNode) s.parentNode.removeChild(s); }, 500); }
+  window.addEventListener('load', function () { window.setTimeout(hide, 700); }, { once: true });
+  window.setTimeout(hide, 4000);
+})();
 </script>
 </body>
 </html>
