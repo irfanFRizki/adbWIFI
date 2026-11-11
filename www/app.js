@@ -247,7 +247,8 @@
     var on = d.filter(function (x) { return x.router && x.router.online; }).length;
     var adb = d.filter(function (x) { return x.adb && x.adb.status === 'connected'; }).length;
     function stat(cls, n, label) { return '<div class="stat ' + cls + '"><b>' + n + '</b><span>' + label + '</span></div>'; }
-    $('#summary').innerHTML = stat('', d.length, 'Target') + stat('g', on, 'Online') + stat('c', adb, 'ADB');
+    $('#summary').innerHTML = '<div class="summary-head"><div><span class="eyebrow">NETWORK OVERVIEW</span><h2>Perangkat terpantau</h2></div><span class="summary-live">' + on + ' aktif</span></div>' +
+      '<div class="summary-stats">' + stat('', d.length, 'Total target') + stat('g', on, 'Online') + stat('c', adb, 'ADB aktif') + '</div>';
   }
 
   function renderList() {
