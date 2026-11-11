@@ -339,3 +339,12 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+
+.summary { display: block; padding: 18px 18px 7px; }
+.summary-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.summary-head h2 { margin-top:3px; font-size:19px; letter-spacing:-.04em; }
+.eyebrow { color:#7f91bc; font-size:9px; font-weight:800; letter-spacing:.2em; }
+.summary-live { padding:6px 10px; border:1px solid rgba(84,226,194,.22); background:rgba(84,226,194,.07); color:#83e9d1; border-radius:9px; font-size:10px; font-weight:700; }
+.summary-stats { display:flex; gap:10px; }
+.summary-stats .stat { min-width:0; }
+@media (min-width:720px) { .summary { max-width:1000px; margin-left:auto; margin-right:auto; } }
