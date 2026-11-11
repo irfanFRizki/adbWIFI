@@ -105,6 +105,25 @@ test('kecepatan rx/tx dari selisih sampel', () => {
   assert.equal(store['1.1.1.1'].cur, null);                                // riwayat dibuang
 });
 
+test('header kunci hanya untuk URL Cloudflare dan opsional', async () => {
+  const seen = [];
+  const settings = { urls: ['http://lan.example', 'http://tail.example', 'https://cf.example/cgi-bin/hpmon/index.sh'], token: 'dummy-token', cfkey: 'dummy-key' };
+  const api = L.createApi({
+    getSettings: () => settings,
+    transport: async (req) => { seen.push(req); return { status: 200, data: JSON.stringify({ timestamp: 1, devices: [] }) }; }
+  });
+  await api.status();
+  assert.equal(seen[0].url, 'http://lan.example/cgi-bin/hpmon/index.sh/status');
+  assert.equal(seen[0].headers['X-Adbwifi-Key'], undefined);
+  settings.urls[0] = 'https://cf.example/cgi-bin/hpmon/index.sh';
+  settings.cfkey = 'dummy-key';
+  await api.status();
+  assert.equal(seen[1].headers['X-Adbwifi-Key'], 'dummy-key');
+  settings.cfkey = '';
+  await api.status();
+  assert.equal(seen[2].headers['X-Adbwifi-Key'], undefined);
+});
+
 test('klien API terhadap server tiruan', async () => {
   const { server, port, state } = await mock.start(0);
   try {

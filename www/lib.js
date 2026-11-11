@@ -227,7 +227,7 @@
     try { return JSON.parse(data); } catch (e) { return data; }
   }
 
-  /* opts.getSettings() -> { urls: [url1, url2], token }
+  /* opts.getSettings() -> { urls: [url1, url2, url3], token, cfkey }
    * opts.transport(req) -> Promise<{status, data}>   req: {url, method, headers, body, timeout} */
   function createApi(opts) {
     var lastGood = ''; // URL yang terakhir berhasil: dicoba lebih dulu agar tidak menunggu URL mati satu per satu
@@ -242,8 +242,18 @@
       }
       if (!st.token) return Promise.reject(new ApiError('config', 'Token belum diatur.'));
 
-      var headers = { 'Authorization': 'Bearer ' + st.token, 'Accept': 'application/json' };
-      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      var baseHeaders = { 'Authorization': 'Bearer ' + st.token, 'Accept': 'application/json' };
+      if (body !== undefined) baseHeaders['Content-Type'] = 'application/json';
+      var cfUrl = normalizeBaseUrl(st.urls && st.urls[2]);
+      var cfKey = st.cfkey && st.cfkey.trim() ? st.cfkey : '';
+      // Header kunci hanya untuk request yang menuju URL ke-3 (Cloudflare).
+      function headersFor(base) {
+        if (!cfKey || !cfUrl || base !== cfUrl) return baseHeaders;
+        var h = {};
+        Object.keys(baseHeaders).forEach(function (k) { h[k] = baseHeaders[k]; });
+        h['X-Adbwifi-Key'] = cfKey;
+        return h;
+      }
 
       var lastErr = null;
       var chain = Promise.resolve();
@@ -254,7 +264,7 @@
           if (result) return;
           return Promise.resolve()
             .then(function () {
-              return opts.transport({ url: base + path, method: method, headers: headers, body: body, timeout: timeoutMs });
+              return opts.transport({ url: base + path, method: method, headers: headersFor(base), body: body, timeout: timeoutMs });
             })
             .then(function (res) {
               var data = parseBody(res.data);

@@ -10,6 +10,7 @@ Seluruh endpoint di bawah sudah diuji dengan `curl` di router.
 - Lewat Cloudflare Tunnel (HTTPS): `https://<subdomain>.my.id/cgi-bin/hpmon/index.sh`, mengarah ke `127.0.0.1:8091`.
 - Port 80 (`http://<IP-ROUTER>/cgi-bin/hpmon/index.sh`) masih berfungsi untuk kompatibilitas.
 - Header wajib di setiap request: `Authorization: Bearer <TOKEN>`.
+- Opsional untuk akses lewat Cloudflare: klien dapat mengirim `X-Adbwifi-Key` dari pengaturan hanya pada request ke URL Cloudflare.
 - Body POST: JSON dengan `Content-Type: application/json`.
 - Semua respons berformat JSON. Kesalahan berbentuk `{"error":"<kode>"}` dengan kode status HTTP yang sesuai.
 - Cache data di router diperbarui sekitar tiap **60 detik**.

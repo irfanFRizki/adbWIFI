@@ -9,7 +9,7 @@
   var STALE_MS = 180000; // data router dianggap basi bila timestamp tak berubah 3 menit
 
   var state = {
-    settings: { url1: '', url2: '', url3: '', token: '', interval: 30 },
+    settings: { url1: '', url2: '', url3: '', token: '', cfkey: '', interval: 30 },
     devices: [],
     serverTs: null,
     tsChangedAt: 0,
@@ -65,7 +65,7 @@
   function transport(req) { return isNative() ? nativeTransport(req) : L.fetchTransport(req); }
 
   var api = L.createApi({
-    getSettings: function () { return { urls: [state.settings.url1, state.settings.url2, state.settings.url3], token: state.settings.token }; },
+    getSettings: function () { return { urls: [state.settings.url1, state.settings.url2, state.settings.url3], token: state.settings.token, cfkey: state.settings.cfkey }; },
     transport: transport
   });
 
@@ -553,6 +553,7 @@
     $('#setUrl2').value = state.settings.url2;
     $('#setUrl3').value = state.settings.url3;
     $('#setToken').value = state.settings.token;
+    $('#setCfKey').value = state.settings.cfkey || '';
     $('#setToken').type = 'password';
     $('#tokenToggle').textContent = 'Lihat';
     $('#setInterval').value = String(state.settings.interval);
@@ -568,11 +569,12 @@
     var raw3 = $('#setUrl3').value.trim();
     var url3 = raw3 ? L.normalizeBaseUrl(raw3) : '';
     var token = $('#setToken').value.trim();
+    var cfkey = $('#setCfKey').value.trim();
     if (!url1) return { error: 'URL API utama belum diisi atau tidak valid.' };
     if (raw2 && !url2) return { error: 'URL 2 (Tailscale) tidak valid.' };
     if (raw3 && !url3) return { error: 'URL 3 (Cloudflare) tidak valid.' };
     if (!token) return { error: 'Token API belum diisi.' };
-    return { value: { url1: url1, url2: url2, url3: url3, token: token, interval: Number($('#setInterval').value) || 30 } };
+    return { value: { url1: url1, url2: url2, url3: url3, token: token, cfkey: cfkey, interval: Number($('#setInterval').value) || 30 } };
   }
 
   $('#btnSettings').addEventListener('click', function () { openSettings(false); });
@@ -588,7 +590,7 @@
     var f = readSettingsForm();
     if (f.error) return showFormError('#setMsg', f.error);
     var tmp = L.createApi({
-      getSettings: function () { return { urls: [f.value.url1, f.value.url2, f.value.url3], token: f.value.token }; },
+      getSettings: function () { return { urls: [f.value.url1, f.value.url2, f.value.url3], token: f.value.token, cfkey: f.value.cfkey }; },
       transport: transport
     });
     showFormError('#setMsg', 'Menguji koneksi…', true);
@@ -607,7 +609,7 @@
     state.settings = f.value;
     await Promise.all([
       storeSet('url1', f.value.url1), storeSet('url2', f.value.url2), storeSet('url3', f.value.url3),
-      storeSet('token', f.value.token), storeSet('interval', f.value.interval)
+      storeSet('token', f.value.token), storeSet('cfkey', f.value.cfkey), storeSet('interval', f.value.interval)
     ]);
     state.devices = [];
     state.samples = {};
@@ -622,9 +624,9 @@
   /* ---------- mulai ---------- */
 
   async function init() {
-    var v = await Promise.all([storeGet('url1'), storeGet('url2'), storeGet('token'), storeGet('interval'), storeGet('url3')]);
+    var v = await Promise.all([storeGet('url1'), storeGet('url2'), storeGet('token'), storeGet('interval'), storeGet('url3'), storeGet('cfkey')]);
     state.settings = {
-      url1: v[0] || '', url2: v[1] || '', url3: v[4] || '', token: v[2] || '',
+      url1: v[0] || '', url2: v[1] || '', url3: v[4] || '', token: v[2] || '', cfkey: v[5] || '',
       interval: [15, 30, 60].indexOf(Number(v[3])) !== -1 ? Number(v[3]) : 30
     };
     $('#verLabel').textContent = 'v' + (window.APP_VERSION || 'dev');
