@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0b0f12">
+<meta name="theme-color" content="#080b18">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Monitor perangkat Android melalui Wireless ADB dan jaringan WiFi.">
+<link rel="icon" type="image/svg+xml" href="assets/adbwifi-favicon.svg">
 <title>ADB WiFi Monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,9 +14,10 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="startup-splash" id="startupSplash" aria-label="Memulai adbWIFI"><div class="splash-content"><img class="splash-mark" src="assets/adbwifi-mark.svg" alt=""><div class="splash-name">adb<span>WIFI</span></div><div class="splash-caption">DEVICE MONITOR</div><div class="splash-loader"></div></div></div>
 
 <header class="top">
-  <div class="brand"><span class="pulse" id="pulse"></span><h1>ADB WiFi Monitor</h1></div>
+  <div class="brand"><img class="brand-mark" src="assets/adbwifi-mark.svg" alt="" width="38" height="38"><div><h1>adbWIFI</h1><span class="brand-sub">DEVICE MONITOR</span></div><span class="pulse" id="pulse" aria-label="Status koneksi"></span></div>
   <div class="top-actions">
     <button class="icon-btn" id="btnRefresh" aria-label="Segarkan">&#8635;</button>
     <button class="icon-btn" id="btnSettings" aria-label="Pengaturan">&#9881;</button>
@@ -111,5 +115,8 @@
 <script src="version.js"></script>
 <script src="lib.js"></script>
 <script src="app.js"></script>
+<script>
+(function(){var s=document.getElementById("startupSplash");function hide(){if(!s)return;s.classList.add("leaving");window.setTimeout(function(){if(s&&s.parentNode)s.parentNode.removeChild(s);},500);}window.addEventListener("load",function(){window.setTimeout(hide,650);},{once:true});window.setTimeout(hide,3500);})();
+</script>
 </body>
 </html>
