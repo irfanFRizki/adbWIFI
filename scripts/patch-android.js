@@ -63,6 +63,8 @@ fs.writeFileSync(path.join(root, 'www', 'version.js'), "window.APP_VERSION = '" 
 const resDir = path.join(root, 'android', 'app', 'src', 'main', 'res');
 const mipmapDir = path.join(resDir, 'mipmap-anydpi-v26');
 fs.mkdirSync(mipmapDir, { recursive: true });
+const iconForegroundPath = path.join(resDir, 'drawable', 'ic_adbwifi_foreground.xml');
+fs.mkdirSync(path.dirname(iconForegroundPath), { recursive: true });
 const iconForeground = `<vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
     <path android:fillColor="#10172B" android:pathData="M54,5 C81,5 103,27 103,54 C103,81 81,103 54,103 C27,103 5,81 5,54 C5,27 27,5 54,5 Z"/>
@@ -72,7 +74,7 @@ const iconForeground = `<vector xmlns:android="http://schemas.android.com/apk/re
     <path android:strokeColor="#F2F5FF" android:strokeWidth="4" android:fillColor="#00000000" android:pathData="M42,64 L66,64 Q70,64 70,69 L70,88 Q70,92 66,92 L42,92 Q38,92 38,88 L38,69 Q38,64 42,64 Z"/>
     <path android:strokeColor="#7D8CFF" android:strokeWidth="2.5" android:strokeLineCap="round" android:pathData="M48,86 L60,86"/>
 </vector>`;
-fs.writeFileSync(path.join(resDir, 'drawable', 'ic_adbwifi_foreground.xml'), iconForeground);
+fs.writeFileSync(iconForegroundPath, iconForeground);
 fs.writeFileSync(path.join(mipmapDir, 'ic_launcher.xml'), `<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/adbwifi_icon_background"/>
     <foreground android:drawable="@drawable/ic_adbwifi_foreground"/>
