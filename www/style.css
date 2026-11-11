@@ -147,6 +147,17 @@ a:hover { text-decoration: underline; }
 
 .hidden { display: none !important; }
 
+/* Ikon sprite: semua simbol di index.html adalah garis outline tanpa atribut
+   stroke/fill. Properti ini diwarisi ke isi <symbol> lewat elemen <use>;
+   tanpa aturan ini ikon tampil sebagai bentuk hitam solid. */
+use {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* ======================================== */
 /* Focus & Accessibility                    */
 
@@ -172,11 +183,16 @@ a:hover { text-decoration: underline; }
 .app-shell {
   display: grid;
   grid-template-rows: auto 1fr;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
   --sidebar-width: 260px;
   --sidebar-collapsed: 72px;
   --header-height: 56px;
+}
+
+/* Sidebar diciutkan: kolom grid ikut menyempit (bukan margin) */
+.app-shell.sidebar-collapsed {
+  grid-template-columns: var(--sidebar-collapsed) minmax(0, 1fr);
 }
 
 /* Sidebar */
@@ -283,7 +299,7 @@ a:hover { text-decoration: underline; }
 .nav-icon {
   width: 20px; height: 20px;
   flex-shrink: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   transition: color var(--transition-fast);
 }
 
@@ -431,14 +447,27 @@ a:hover { text-decoration: underline; }
   visibility: visible;
 }
 
-/* Mobile: sidebar slides in */
+/* Mobile/tablet: sidebar menggeser masuk di atas konten; grid hanya satu kolom.
+   Sebelumnya kolom 260px tetap dicadangkan sehingga konten terdorong ke kanan
+   dan terpotong di layar HP. */
 @media (max-width: 1024px) {
+  .app-shell,
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .header,
+  .main {
+    grid-column: 1;
+  }
   .sidebar {
     transform: translateX(-100%);
+    width: min(var(--sidebar-width), 86vw);
   }
   .sidebar.open {
     transform: translateX(0);
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.45);
   }
+  .sidebar-toggle { display: none; }
   .sidebar-overlay.visible { display: block; }
 }
 
@@ -446,9 +475,6 @@ a:hover { text-decoration: underline; }
 @media (min-width: 1025px) {
   .app-shell.sidebar-collapsed .sidebar {
     width: var(--sidebar-collapsed);
-  }
-  .app-shell.sidebar-collapsed .main {
-    margin-left: var(--sidebar-collapsed);
   }
   .sidebar-toggle svg { transform: rotate(180deg); }
 }
@@ -656,8 +682,17 @@ a:hover { text-decoration: underline; }
   width: 40px; height: 40px;
   border-radius: var(--radius-sm);
   display: grid; place-items: center;
-  color: var(--text-on-accent);
+  background: var(--primary-muted);
+  color: var(--primary);
 }
+/* <svg> di dalam kartu tidak punya atribut ukuran: tanpa ini SVG memakai
+   ukuran bawaan 300x150 dan menutupi seluruh kartu. */
+.stat-card-icon svg { width: 22px; height: 22px; flex-shrink: 0; }
+/* Urutan kartu: Perangkat, Online, Offline, ADB connected */
+.dashboard-grid > .stat-card:nth-child(2) .stat-card-icon { background: var(--success-muted); color: var(--success); }
+.dashboard-grid > .stat-card:nth-child(3) .stat-card-icon { background: var(--danger-muted); color: var(--danger); }
+.dashboard-grid > .stat-card:nth-child(4) .stat-card-icon { background: var(--primary-muted); color: var(--cyan); }
+.stat-card { min-width: 0; }
 
 .stat-card-value {
   font-size: var(--text-3xl);
@@ -710,6 +745,10 @@ a:hover { text-decoration: underline; }
 
 .badge-primary { background: var(--primary-muted); color: var(--primary); }
 .badge-primary .badge-dot { background: var(--primary); }
+
+/* Dipakai app.js (mis. status "ADB connected"); sebelumnya tidak ada gayanya */
+.badge-info { background: var(--primary-muted); color: var(--cyan); }
+.badge-info .badge-dot { background: var(--cyan); }
 
 /* Device status badge (combines online + ADB) */
 .device-status {
@@ -926,10 +965,10 @@ a:hover { text-decoration: underline; }
 
 .dashboard-grid {
   display: grid; gap: var(--space-4);
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
-@media (min-width: 640px) { .dashboard-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (min-width: 1024px) { .dashboard-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 640px) { .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .dashboard-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 .dashboard-section { margin-top: var(--space-6); }
 .dashboard-section-header {
@@ -939,9 +978,9 @@ a:hover { text-decoration: underline; }
 .dashboard-section-title { font-size: var(--text-lg); font-weight: 600; }
 .dashboard-section-action { font-size: var(--text-sm); color: var(--primary); }
 
-.device-list { display: grid; gap: var(--space-3); grid-template-columns: 1fr; }
-@media (min-width: 768px) { .device-list { grid-template-columns: repeat(2, 1fr); } }
-@media (min-width: 1200px) { .device-list { grid-template-columns: repeat(3, 1fr); } }
+.device-list { display: grid; gap: var(--space-3); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 768px) { .device-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1200px) { .device-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 .device-card {
   background: var(--surface);
@@ -949,6 +988,7 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-md);
   padding: var(--space-4);
   display: flex; flex-direction: column; gap: var(--space-3);
+  min-width: 0;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .device-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
@@ -960,9 +1000,12 @@ a:hover { text-decoration: underline; }
 .device-card-name { font-size: var(--text-base); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .device-card-meta { font-size: var(--text-xs); color: var(--text-dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.device-card-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); flex-shrink: 0; }
+/* Badge turun ke bawah nama/IP agar tidak terpotong/menjorok keluar kartu (semua lebar layar) */
+.device-card-header { flex-wrap: wrap; }
+.device-card-info { flex-basis: 100%; }
+.device-card-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); flex-shrink: 1; min-width: 0; }
 
-.device-card-metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2) var(--space-3); }
+.device-card-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-3); }
 .metric-item { min-width: 0; }
 .metric-label { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
 .metric-value { font-size: var(--text-sm); font-family: var(--font-mono); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -992,9 +1035,9 @@ a:hover { text-decoration: underline; }
 .detail-panel.active { display: block; animation: fade-in var(--transition-fast); }
 @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-.detail-grid { display: grid; gap: var(--space-4); grid-template-columns: 1fr; }
-@media (min-width: 768px) { .detail-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (min-width: 1024px) { .detail-grid { grid-template-columns: repeat(3, 1fr); } }
+.detail-grid { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 768px) { .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 .detail-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); }
 .detail-section-title { font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); margin-bottom: var(--space-3); }
@@ -1041,8 +1084,8 @@ a:hover { text-decoration: underline; }
 /* Settings */
 .settings-section { margin-bottom: var(--space-6); }
 .settings-section-title { font-size: var(--text-lg); font-weight: 600; margin-bottom: var(--space-3); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
-.settings-grid { display: grid; gap: var(--space-4); grid-template-columns: 1fr; }
-@media (min-width: 768px) { .settings-grid { grid-template-columns: repeat(2, 1fr); } }
+.settings-grid { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 768px) { .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .setting-item { display: flex; flex-direction: column; gap: var(--space-1); }
 .setting-label { font-size: var(--text-sm); font-weight: 500; }
 .setting-hint { font-size: var(--text-xs); color: var(--text-dim); }
@@ -1100,15 +1143,16 @@ a:hover { text-decoration: underline; }
 @media (max-width: 640px) {
   .header { padding: 0 var(--space-3); }
   .main { padding: var(--space-4); }
-  .dashboard-grid { grid-template-columns: 1fr; }
-  .detail-grid { grid-template-columns: 1fr; }
-  .settings-grid { grid-template-columns: 1fr; }
-  .device-card-metrics { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .device-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .modal { width: 100%; max-width: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0; top: auto; bottom: 0; transform: translateX(-50%) translateY(100%); max-height: 85vh; }
   .modal.visible { transform: translateX(-50%) translateY(0); }
   .sheet { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
   .search-filter-bar { flex-direction: column; }
-  .search-input, .filter-select { width: 100%; min-width: 0; }
+  /* flex:none — pada kolom, flex:1 membuat tinggi kotak pencarian mengerut */
+  .search-input, .filter-select { flex: none; width: 100%; min-width: 0; }
   .toast-container { left: var(--space-3); right: var(--space-3); bottom: var(--space-3); }
 }
 
