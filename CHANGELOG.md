@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.6.2
+
+- Fix: `/screenshot` gagal diam-diam (HTTP 200, body kosong 1 byte) untuk HP dengan
+  screenshot besar (layar aktif, resolusi tinggi — reproduksi nyata di Redmi Note 7
+  1080x2340). Penyebab: `jq -n --arg b64 "$B64" ...` dieksekusi lewat `execve()`, dan
+  Linux membatasi satu argumen command-line maksimal 128KB (`MAX_ARG_STRLEN`, terpisah
+  dari `ARG_MAX` total) — base64 PNG yang lebih besar dari itu membuat `jq` gagal exec
+  dengan "Argument list too long" (exit 126), tapi exit code ini tidak pernah dicek
+  sebelumnya, jadi `BODY` tetap string kosong dan `STATUS` tetap default "200 OK".
+  Diverifikasi dengan reproduksi payload 400KB: pendekatan lama gagal exit 126 persis
+  seperti ini; pendekatan baru (konkatenasi string shell, tanpa exec) menghasilkan
+  JSON valid. Fix: rakit JSON lewat konkatenasi shell langsung, bukan `jq --arg` —
+  base64 hanya berisi karakter yang aman dipakai langsung dalam string JSON tanpa
+  escaping (A-Z/a-z/0-9/+//=), jadi aman tanpa jq sama sekali untuk bagian ini.
+
 ## v0.6.1
 
 - Fix: `/optimize` mengembalikan `top_apps` kosong karena `dumpsys meminfo` penuh

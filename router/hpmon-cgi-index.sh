@@ -195,8 +195,13 @@ else
           if [ -s "$OUTFILE" ] && [ "${SIZE:-0}" -gt 0 ]; then
             B64=$(base64 "$OUTFILE" 2>/dev/null | tr -d '\n')
             if [ -n "$B64" ]; then
-              BODY=$(jq -n --arg b64 "$B64" --argjson bytes "${SIZE:-0}" --argjson sec "$((T1 - T0))" \
-                '{ok:true, png_base64:$b64, bytes:$bytes, seconds:$sec}')
+              # SENGAJA tidak lewat `jq --arg` di sini: base64 dari screenshot resolusi
+              # tinggi/layar aktif bisa >128KB, melewati batas MAX_ARG_STRLEN Linux per
+              # argumen command (bukan ARG_MAX total) -- jq akan gagal exec diam-diam,
+              # BODY jadi kosong padahal STATUS masih default "200 OK". base64 cuma berisi
+              # A-Z/a-z/0-9/+//=, semuanya aman dipakai langsung sebagai string JSON tanpa
+              # escaping, jadi dirakit lewat konkatenasi shell biasa (tanpa exec/argv).
+              BODY='{"ok":true,"png_base64":"'"$B64"'","bytes":'"${SIZE:-0}"',"seconds":'"$((T1 - T0))"'}'
             else
               STATUS="500 Internal Server Error"; BODY='{"error":"encode_failed"}'
             fi
