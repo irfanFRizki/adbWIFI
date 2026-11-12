@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.7.0
+
+- Fitur: **arus baterai (`current_ma`) untuk HP Android 10+ yang sysfs-nya diblokir**.
+  `/sys/class/power_supply/battery/current_now` sering `Permission denied` lewat `adb shell`
+  di Android 10+ (dikonfirmasi lewat audit: Redmi Note 7/Android 10 ditolak, Samsung
+  SM-P355/Android 7.1.1 bisa dibaca) — ternyata ini kebijakan SELinux terhadap domain
+  `shell`, bukan izin file POSIX (file tetap `-r--r--r--` di kedua perangkat), jadi tidak
+  ada cara aman menembusnya lewat ADB shell biasa tanpa root.
+- Ditambahkan `helper-app/` — APK terpisah, kecil, tanpa UI dan tanpa izin khusus, yang
+  di-install manual sekali per HP **yang dipantau** (bukan HP kontroler). Satu-satunya
+  komponennya adalah `BroadcastReceiver` yang membaca
+  `BatteryManager.getIntProperty(BATTERY_PROPERTY_CURRENT_NOW/_AVERAGE)` — API resmi yang
+  dipakai aplikasi seperti AccuBattery, berjalan sebagai proses aplikasi biasa sehingga
+  tidak terkena pembatasan SELinux yang sama dengan proses `shell` — lalu menulis hasilnya
+  ke `getExternalFilesDir()/current.json` (tidak butuh `WRITE_EXTERNAL_STORAGE`, tetap bisa
+  dibaca `adb shell cat` karena shell sudah di grup `sdcard_rw`).
+- `hpmon-daemon-v2.sh`: bila baca `current_now` sysfs gagal, coba fallback memicu helper
+  lewat `adb shell am broadcast -n <pkg>/.CurrentReceiver -a <pkg>.READ_CURRENT`, tunggu
+  sebentar, lalu baca file hasilnya. Aman untuk HP yang belum pasang helper-nya: broadcast
+  tanpa receiver cocok = no-op, file tidak ada, `current_ma` tetap `null` seperti sebelum
+  fitur ini ada — jadi bisa dipasang bertahap, satu HP dulu untuk diuji.
+- CI: job baru `build-helper` di `build-apk.yml` membangun `helper-app/` (proyek Gradle
+  native, bukan Capacitor) jadi `adbwifi-helper.apk`, diunggah sebagai artifact dan
+  dilampirkan ke GitHub Release saat tag `v*` — terpisah dari APK utama karena memang APK
+  yang berbeda, dipasang di perangkat yang berbeda.
+
 ## v0.6.2
 
 - Fix: `/screenshot` gagal diam-diam (HTTP 200, body kosong 1 byte) untuk HP dengan

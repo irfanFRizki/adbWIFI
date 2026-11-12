@@ -8,6 +8,9 @@ CACHE_FILE="/tmp/hpmon_cache.json"
 INTERVAL=60
 ADB_TIMEOUT=5
 ADB_CMD_TIMEOUT=8
+# Package APK helper opsional (lihat helper-app/), dipasang manual sekali per HP via
+# `adb install` untuk baca arus baterai lewat BatteryManager API saat sysfs diblokir.
+HELPER_PKG="com.irfanfrizki.adbwifihelper"
 
 log() {
   logger -t hpmon-daemon "$@"
@@ -270,7 +273,25 @@ get_adb_data() {
       current_ma=$(awk "BEGIN{printf \"%.3f\", $cnow/1000}")
       current_available="true"
     else
+      # sysfs ditolak (umum di Android 10+ karena SELinux membatasi domain shell,
+      # terlepas dari mode file -- lihat CHANGELOG v0.7.0). Coba lewat helper app
+      # (BatteryManager API, berjalan sebagai proses aplikasi biasa, tidak kena
+      # batasan yang sama) kalau sudah terpasang di HP ini. Aman di HP yang BELUM
+      # pasang helper-nya: broadcast tanpa receiver cocok = no-op, file tidak ada,
+      # current_ma tetap "null" seperti sebelumnya.
       current_ma="null"; current_available="false"
+      adb_run "$addr" am broadcast -n "$HELPER_PKG/.CurrentReceiver" -a "$HELPER_PKG.READ_CURRENT" >/dev/null 2>&1
+      sleep 1
+      local hjson hnow
+      hjson=$(adb_run "$addr" cat "/sdcard/Android/data/$HELPER_PKG/files/current.json" 2>/dev/null | tr -d '\r')
+      # awk match(), bukan sed \{m,n\}, supaya tidak bergantung pada dukungan interval
+      # regex di BusyBox sed. Pola butuh digit setelah ":" -- kalau nilainya "null"
+      # (properti tidak didukung HP), tidak match dan hnow tetap kosong (fallback aman).
+      hnow=$(echo "$hjson" | awk 'match($0, /"current_now_ua":-?[0-9]+/) { s = substr($0, RSTART, RLENGTH); sub(/.*:/, "", s); print s }')
+      if [ -n "$hnow" ]; then
+        current_ma=$(awk "BEGIN{printf \"%.3f\", $hnow/1000}")
+        current_available="true"
+      fi
     fi
     # avg drain
     local now_ts; now_ts=$(date +%s)

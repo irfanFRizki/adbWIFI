@@ -1,6 +1,6 @@
 {
   "name": "adbwifi-monitor",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "private": true,
   "description": "Aplikasi Android untuk memantau HP di WiFi OpenWrt lewat API hpmon (ADB di router).",
   "license": "MIT",

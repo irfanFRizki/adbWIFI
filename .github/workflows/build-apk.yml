@@ -77,3 +77,45 @@ jobs:
         with:
           files: ${{ steps.apk.outputs.file }}
           generate_release_notes: true
+
+  build-helper:
+    # APK kecil tanpa UI untuk dipasang sekali per HP yang dipantau (bukan di HP
+    # kontroler). Lihat helper-app/README.md. Terpisah dari job `build` karena bukan
+    # proyek Capacitor dan tidak butuh Node -- native Android murni.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Build helper APK rilis
+        working-directory: helper-app
+        run: gradle assembleRelease --no-daemon
+
+      - name: Namai APK
+        id: apk
+        run: |
+          OUT="adbwifi-helper.apk"
+          cp helper-app/app/build/outputs/apk/release/app-release.apk "$OUT"
+          echo "file=$OUT" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adbwifi-helper-apk
+          path: ${{ steps.apk.outputs.file }}
+          if-no-files-found: error
+
+      - name: Rilis di GitHub (hanya untuk tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.file }}
+          generate_release_notes: true

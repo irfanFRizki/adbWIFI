@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ADB WiFi Helper - komponen kecil tanpa UI, tanpa izin khusus.
+  Satu-satunya tugas: saat menerima broadcast READ_CURRENT (dipicu lewat
+  `adb shell am broadcast`), baca arus baterai via BatteryManager API dan
+  tulis hasilnya ke file di external-files-dir milik app ini sendiri
+  (tidak butuh WRITE_EXTERNAL_STORAGE), supaya bisa dibaca kembali lewat
+  `adb shell cat` biasa (shell sudah punya grup sdcard_rw).
+
+  Tidak ada <activity> / launcher icon -- sengaja, ini bukan app yang dibuka
+  manual, hanya di-install sekali per HP lalu dipicu dari backend adbWIFI.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:label="@string/app_name"
+        android:allowBackup="false">
+
+        <receiver
+            android:name=".CurrentReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.irfanfrizki.adbwifihelper.READ_CURRENT" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>

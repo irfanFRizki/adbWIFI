@@ -114,7 +114,7 @@ Menghapus target. Body: `{"ip":"192.168.7.188"}`. Berhasil → `{"ok":true}`.
 | `adb.charge_source` | string | ya | `"ac"`, `"usb"`, `"wireless"`, atau `null` |
 | `adb.temp_c` | number | ya | Suhu baterai (°C) |
 | `adb.voltage_mv` | integer | ya | Tegangan baterai (mV) |
-| `adb.current_ma` | number | ya | Arus baterai (mA): positif = mengisi, negatif = dipakai. `null` bila Android membatasi pembacaan (sering terjadi tanpa root) |
+| `adb.current_ma` | number | ya | Arus baterai (mA): positif = mengisi, negatif = dipakai. Dibaca dari `/sys/class/power_supply/battery/current_now`; jika ditolak (umum di Android 10+ karena SELinux membatasi domain shell), daemon mencoba fallback lewat helper-app (lihat `helper-app/README.md`) bila sudah terpasang di HP tersebut. `null` bila keduanya tidak tersedia |
 | `adb.current_available` | boolean | tidak | `false` bila `current_ma` tidak dapat dibaca |
 | `adb.avg_drain_pct_per_hour` | number | ya | Rata-rata penurunan baterai %/jam saat tidak mengisi (3 jam terakhir); `null` bila data kurang dari ±30 menit atau sedang mengisi |
 | `adb.foreground_app` | object | tidak | `{ "package": string\|null, "label": string\|null }`; `package` `null` bila layar mati/terkunci. `label` hanya terisi untuk aplikasi di `/etc/hpmon/app-labels.json`. Klien juga sebaiknya membaca `detail.foreground_app` bila ada |

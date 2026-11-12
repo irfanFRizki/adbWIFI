@@ -1,0 +1,2 @@
+rootProject.name = 'adbwifi-helper'
+include ':app'

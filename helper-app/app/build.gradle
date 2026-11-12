@@ -1,0 +1,45 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.irfanfrizki.adbwifihelper'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.irfanfrizki.adbwifihelper'
+        minSdkVersion 24
+        // Sengaja rendah (bukan mengikuti SDK terbaru): app ini tidak pernah dirilis ke
+        // Play Store, hanya di-sideload sekali per HP lewat `adb install`. targetSdk rendah
+        // menghindari pembatasan scoped-storage/background-broadcast yang lebih ketat di
+        // API 29+, supaya tulis file ke getExternalFilesDir() dan explicit broadcast tetap
+        // berjalan sederhana di semua versi Android yang dipakai proyek ini (7.1-10).
+        targetSdkVersion 28
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        release {
+            storeFile rootProject.file('../ci/adbwifi-helper.keystore')
+            storePassword 'adbwifi-ci'
+            keyAlias 'adbwifihelper'
+            keyPassword 'adbwifi-ci'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

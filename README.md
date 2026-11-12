@@ -50,6 +50,8 @@ npm run check     # cek sintaks JS
 
 Antarmuka ada di `www/` (HTML/CSS/JS biasa, tanpa framework). Logika murni berada di `www/lib.js` agar bisa diuji dengan Node. Dokumentasi API ada di [`docs/API.md`](docs/API.md).
 
+APK kedua di [`helper-app/`](helper-app/README.md) — kecil, tanpa UI — opsional dipasang di HP yang dipantau untuk baca arus baterai di Android 10+ (lihat README-nya untuk kenapa ini perlu).
+
 ## Keamanan
 
 - API memakai **HTTP biasa** (tanpa TLS) dengan token Bearer, jadi token dan data tidak terenkripsi di jaringan. Pakai hanya di LAN tepercaya atau lewat Tailscale; jangan buka API ke internet.
