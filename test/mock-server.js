@@ -73,6 +73,26 @@ function start(port) {
         }
         return send(200, { timestamp: now, devices: state.targets.map((t) => deviceFor(t, now, state)) });
       }
+      if (route === '/screenshot' && req.method === 'GET') {
+        const ip = url.searchParams.get('ip');
+        const t = state.targets.find((x) => x.ip === ip);
+        if (!t) return send(404, { error: 'not_found', ip });
+        const d = deviceFor(t, now, state);
+        if (d.adb.status !== 'connected') return send(409, { error: 'adb_not_connected' });
+        if (state.screenshotFail) return send(504, { error: 'screencap_timeout' });
+        return send(200, { ok: true, png_base64: 'iVBORw0KGgo=', bytes: 8, seconds: state.screenshotSeconds || 1 });
+      }
+      if (route === '/optimize' && req.method === 'GET') {
+        const ip = url.searchParams.get('ip');
+        const t = state.targets.find((x) => x.ip === ip);
+        if (!t) return send(404, { error: 'not_found', ip });
+        const d = deviceFor(t, now, state);
+        if (d.adb.status !== 'connected') return send(409, { error: 'adb_not_connected' });
+        return send(200, {
+          ok: true, ram: { total_kb: 3826256, available_kb: 1501140 }, cpu_percent: 38.2,
+          top_apps: [{ kb: 58315, label: 'com.google.android.gms (pid 1234)' }, { kb: 45331, label: 'system (pid 567)' }]
+        });
+      }
       if (route === '/targets' && req.method === 'GET') return send(200, state.targets);
       if (route === '/targets/add' || route === '/targets/delete') {
         if (req.method !== 'POST') return send(405, { error: 'method_not_allowed' });

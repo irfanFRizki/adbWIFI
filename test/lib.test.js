@@ -153,6 +153,16 @@ test('klien API terhadap server tiruan', async () => {
     assert.equal(state.targets.length, 2);
     await assert.rejects(api.deleteTarget('192.168.7.188'), (e) => e.status === 404);
 
+    const shot = await api.screenshot('192.168.7.177');
+    assert.equal(shot.ok, true);
+    assert.equal(shot.png_base64, 'iVBORw0KGgo=');
+    await assert.rejects(api.screenshot('192.168.7.245'), (e) => e.status === 409 && e.code === 'adb_not_connected');
+
+    const optim = await api.optimize('192.168.7.177');
+    assert.equal(optim.ok, true);
+    assert.equal(optim.top_apps.length, 2);
+    assert.equal(optim.top_apps[0].kb, 58315);
+
     settings = { urls: [base, ''], token: 'salah' };
     await assert.rejects(api.status(), (e) => e.kind === 'auth' && L.errorMessage(e) === 'Token salah atau belum diisi.');
     settings = { urls: [], token: mock.TOKEN };

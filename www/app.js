@@ -405,8 +405,20 @@
     if (c) c.textContent = list.length + ' dari ' + detailApps.length + ' aplikasi';
   }
 
+  function shotHtml() {
+    return '<button type="button" class="btn ghost small" data-action="shot">Ambil screenshot</button>' +
+      '<p class="sub" style="margin-top:8px">Beberapa HP bisa butuh hingga ±2 menit.</p>';
+  }
+  function optimHtml() {
+    return '<button type="button" class="btn ghost small" data-action="optim">Cek performa</button>';
+  }
+
   function detailHtml(dev, detail, mode) {
     var h = '<div id="dBasic">' + metricsHtml(dev, true) + noteHtml(dev) + '</div><div id="dBattery">' + batteryHtml(dev) + '</div>';
+    if (dev.adb && dev.adb.status === 'connected') {
+      h += '<div class="sec"><h3>Screenshot</h3><div id="dShot">' + shotHtml() + '</div></div>';
+      h += '<div class="sec"><h3>Optimasi</h3><div id="dOptim">' + optimHtml() + '</div></div>';
+    }
     if (mode === 'none') return h;
     h += '<div class="sec"><h3>Detail langsung dari HP</h3><div id="dLive">';
     if (mode === 'loading') {
@@ -473,6 +485,81 @@
       $('#dBody').innerHTML = detailHtml(dev, L.errorMessage(e), 'error');
     }
   }
+
+  /* ---------- screenshot & optimasi (manual, tidak otomatis) ---------- */
+
+  var shotSeq = 0, optimSeq = 0;
+
+  async function loadShot() {
+    var ip = state.detailIp;
+    var box = $('#dShot');
+    if (!ip || !box) return;
+    var seq = ++shotSeq;
+    box.innerHTML = '<div class="skeleton"></div><div class="skeleton" style="width:60%"></div>' +
+      '<p class="sub">Mengambil screenshot lewat ADB, bisa sampai ±2 menit…</p>';
+    try {
+      var res = await api.screenshot(ip);
+      if (seq !== shotSeq || state.detailIp !== ip) return;
+      if (res && res.ok && res.png_base64) {
+        box.innerHTML = '<img class="shot-img" alt="Screenshot" src="data:image/png;base64,' + res.png_base64 + '">' +
+          '<p class="sub" style="margin-top:8px">' + esc(L.formatBytes(res.bytes)) + ' · ' + esc(res.seconds) + ' dtk</p>' +
+          '<button type="button" class="btn ghost small" data-action="shot" style="margin-top:8px">Ambil ulang</button>';
+      } else {
+        box.innerHTML = '<p class="form-error">Gagal mengambil screenshot.</p>' + shotHtml();
+      }
+    } catch (e) {
+      if (seq !== shotSeq || state.detailIp !== ip) return;
+      box.innerHTML = '<p class="form-error">' + esc(L.errorMessage(e)) + '</p>' + shotHtml();
+    }
+  }
+
+  async function loadOptim() {
+    var ip = state.detailIp;
+    var box = $('#dOptim');
+    if (!ip || !box) return;
+    var seq = ++optimSeq;
+    box.innerHTML = '<div class="skeleton"></div><div class="skeleton" style="width:70%"></div>' +
+      '<p class="sub">Membaca RAM/CPU lewat ADB…</p>';
+    try {
+      var res = await api.optimize(ip);
+      if (seq !== optimSeq || state.detailIp !== ip) return;
+      if (res && res.ok) {
+        var total = Number(res.ram && res.ram.total_kb), avail = Number(res.ram && res.ram.available_kb);
+        var used = total > 0 && !isNaN(avail) ? total - avail : null;
+        var usedPct = used !== null ? Math.round(used / total * 100) : null;
+        var h = '<div class="metrics">';
+        h += metric('RAM terpakai', usedPct === null ? '—' :
+          (L.formatBytes(used * 1024) + ' / ' + L.formatBytes(total * 1024) + ' (' + usedPct + '%)' +
+            bar(100 - usedPct, usedPct >= 85 ? 'low' : (usedPct >= 70 ? 'mid' : 'cy'))), true);
+        var cpu = res.cpu_percent;
+        h += metric('CPU', cpu === null || cpu === undefined ? '—' :
+          (cpu + '%' + bar(100 - cpu, cpu >= 85 ? 'low' : (cpu >= 60 ? 'mid' : 'cy'))), true);
+        h += '</div>';
+        if (Array.isArray(res.top_apps) && res.top_apps.length) {
+          h += '<p class="sub" style="margin-top:10px">Proses pemakai RAM terbesar</p><div class="apps">';
+          res.top_apps.forEach(function (a) {
+            h += '<div>' + esc(L.formatBytes(Number(a.kb) * 1024)) + ' — ' + esc(a.label) + '</div>';
+          });
+          h += '</div>';
+        }
+        h += '<button type="button" class="btn ghost small" data-action="optim" style="margin-top:10px">Segarkan</button>';
+        box.innerHTML = h;
+      } else {
+        box.innerHTML = '<p class="form-error">Gagal mengambil data performa.</p>' + optimHtml();
+      }
+    } catch (e) {
+      if (seq !== optimSeq || state.detailIp !== ip) return;
+      box.innerHTML = '<p class="form-error">' + esc(L.errorMessage(e)) + '</p>' + optimHtml();
+    }
+  }
+
+  $('#dBody').addEventListener('click', function (e) {
+    var t = e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!t) return;
+    var action = t.getAttribute('data-action');
+    if (action === 'shot') loadShot();
+    else if (action === 'optim') loadOptim();
+  });
 
   $('#dReload').addEventListener('click', loadDetail);
   $('#dRefreshIp').addEventListener('click', function (e) {

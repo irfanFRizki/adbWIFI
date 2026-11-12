@@ -183,6 +183,8 @@ button, input, select { font: inherit; color: inherit; }
 .apps div { padding: 9px 12px; font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--line); word-break: break-all; }
 .apps div:last-child { border-bottom: 0; }
 
+.shot-img { width: 100%; border-radius: var(--r-sm); display: block; background: var(--panel2); }
+
 .toast {
   position: fixed; left: 16px; right: 16px; bottom: calc(88px + env(safe-area-inset-bottom)); z-index: 40;
   padding: 13px 16px; border-radius: var(--r-sm); background: #38332e; border: none;

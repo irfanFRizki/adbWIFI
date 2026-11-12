@@ -210,7 +210,11 @@
     invalid_json: 'Permintaan tidak dapat dibaca router.',
     ip_duplicate: 'IP ini sudah terdaftar.',
     method_not_allowed: 'Metode tidak didukung router.',
-    detail_requires_ip: 'Detail butuh IP perangkat.'
+    detail_requires_ip: 'Detail butuh IP perangkat.',
+    adb_not_connected: 'ADB belum terhubung ke HP ini.',
+    screencap_timeout: 'HP tidak merespons tangkapan layar tepat waktu. Coba lagi atau bangunkan layarnya dulu.',
+    empty_capture: 'Tangkapan layar kosong. Coba lagi.',
+    encode_failed: 'Gagal memproses hasil tangkapan layar di router.'
   };
 
   function errorMessage(err) {
@@ -302,6 +306,16 @@
       },
       refreshIp: function (ip) {
         return request('POST', '/refresh', { ip: ip }, 20000).then(function (r) { return r.data; });
+      },
+      /* Screenshot HP bisa butuh puluhan detik di HP tertentu (terukur ~89 dtk di satu unit);
+       * timeout digenerosikan jauh di atas itu supaya tidak dipotong sebelum router sendiri menyerah. */
+      screenshot: function (ip) {
+        return request('GET', '/screenshot?ip=' + encodeURIComponent(ip), undefined, 130000)
+          .then(function (r) { return r.data; });
+      },
+      optimize: function (ip) {
+        return request('GET', '/optimize?ip=' + encodeURIComponent(ip), undefined, 20000)
+          .then(function (r) { return r.data; });
       },
       targets: function () {
         return request('GET', '/targets', undefined, 15000).then(function (r) { return r.data; });
