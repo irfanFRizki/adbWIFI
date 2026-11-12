@@ -25,6 +25,15 @@
   native, bukan Capacitor) jadi `adbwifi-helper.apk`, diunggah sebagai artifact dan
   dilampirkan ke GitHub Release saat tag `v*` — terpisah dari APK utama karena memang APK
   yang berbeda, dipasang di perangkat yang berbeda.
+- Fix UI: label "mengisi"/"dipakai" di sebelah nilai Arus sekarang mengikuti status
+  `charging` (dari `dumpsys battery`, independen dan sudah terbukti andal), bukan tanda
+  (+/-) `current_ma`. Dipicu oleh temuan nyata: pada satu HP (Redmi Note 7, diuji lewat
+  Termux:API sebagai pembanding independen di luar helper-app ini) arus tercatat **positif
+  saat discharging dan negatif saat charging** — kebalikan dari konvensi yang sebelumnya
+  diasumsikan di kode ini (dan juga kebalikan dari dokumentasi resmi `BatteryManager`).
+  Konvensi tanda ternyata tidak seragam antar vendor/perangkat, jadi UI tidak lagi
+  menebak arah dari tanda angka mentahnya — nilai mentah (dengan tanda apa adanya) tetap
+  ditampilkan untuk transparansi, tapi label kata-kata tidak lagi bergantung padanya.
 
 ## v0.6.2
 

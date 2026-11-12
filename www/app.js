@@ -152,8 +152,11 @@
       (chg ? 'Mengisi' + (L.chargeSourceText(a.charge_source) ? ' · ' + esc(L.chargeSourceText(a.charge_source)) : '') :
         (a.charging === false ? 'Tidak mengisi' : '')) + '</span></div>' +
       (bat === null ? '' : bar(bat)) + '<div class="kv" style="margin-top:12px">';
+    // Label mengisi/dipakai sengaja TIDAK dari tanda current_ma: konvensi tanda beda-beda
+    // per vendor/HP (terkonfirmasi -- lihat CHANGELOG v0.7.0), jadi ikut status charging
+    // yang sudah independen dan lebih andal (dumpsys battery), bukan menebak dari tanda.
     h += metric('Arus', typeof a.current_ma === 'number' ? esc(L.formatCurrent(a.current_ma)) +
-      (a.current_ma > 0 ? ' <span class="sub">mengisi</span>' : (a.current_ma < 0 ? ' <span class="sub">dipakai</span>' : '')) :
+      ' <span class="sub">' + (chg ? 'mengisi' : 'dipakai') + '</span>' :
       '<span class="unavail">Tidak tersedia (dibatasi Android)</span>');
     h += metric('Suhu', '<span class="temp-' + (L.tempLevel(a.temp_c) || 'ok') + '">' + esc(L.formatTemp(a.temp_c)) + '</span>');
     h += metric('Tegangan', esc(L.formatVoltage(a.voltage_mv)));
