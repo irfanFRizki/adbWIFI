@@ -7,7 +7,7 @@
   (tidak butuh WRITE_EXTERNAL_STORAGE), supaya bisa dibaca kembali lewat
   `adb shell cat` biasa (shell sudah punya grup sdcard_rw).
 
-  Tidak ada <activity> / launcher icon -- sengaja, ini bukan app yang dibuka
+  Tidak ada activity atau launcher icon (sengaja): ini bukan app yang dibuka
   manual, hanya di-install sekali per HP lalu dipicu dari backend adbWIFI.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
