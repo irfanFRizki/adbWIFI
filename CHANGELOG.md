@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.6.1
+
+- Fix: `/optimize` mengembalikan `top_apps` kosong karena `dumpsys meminfo` penuh
+  terukur butuh ~7.7 detik secara alami di salah satu HP (Samsung SM-P355), melebihi
+  budget 6 detik `adb_t()` yang dipakai bersama endpoint lain — output dibunuh
+  sebelum sempat ditulis utuh. Ditambahkan `adb_t_opt()` dengan budget kustom
+  (20 detik) khusus untuk panggilan ini, tidak mengubah `adb_t()`/`ADB_T=6` yang
+  dipakai endpoint lain. Timeout klien `api.optimize()` dinaikkan dari 20 ke 40 detik
+  mengikuti budget server yang baru.
+- Dikonfirmasi lewat pengujian langsung di Pi: `dumpsys meminfo` HP_TAB selesai alami
+  dalam 7,733 detik (255 baris, 10.450 byte), baris "Total PSS by process:" ada di
+  baris ke-4 — bukti bahwa isinya valid, hanya soal waktu tempuh.
+
 ## v0.6.0
 
 - Fitur **Screenshot**: tombol di layar detail perangkat mengambil tangkapan layar HP lewat

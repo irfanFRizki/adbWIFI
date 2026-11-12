@@ -36,6 +36,25 @@ adb_t() {
   rm -f "$outfile"
 }
 
+# Seperti adb_t() tapi dengan batas waktu kustom (bukan ADB_T global). Dipakai untuk
+# dumpsys meminfo di /optimize, yang terukur bisa butuh ~8 detik secara alami pada
+# sebagian HP -- lebih dari ADB_T=6 yang dipakai panggilan ringan lainnya.
+adb_t_opt() {
+  local budget="$1"; shift
+  local addr="$1"; shift
+  local outfile="/tmp/hpmon_cgi_adb_$$"
+  local apid waited=0
+  adb -s "$addr" shell "$@" >"$outfile" 2>/dev/null &
+  apid=$!
+  while kill -0 "$apid" 2>/dev/null; do
+    [ "$waited" -ge "$budget" ] && { kill "$apid" 2>/dev/null; break; }
+    sleep 1; waited=$((waited + 1))
+  done
+  wait "$apid" 2>/dev/null
+  cat "$outfile" 2>/dev/null | tr -d '\r'
+  rm -f "$outfile"
+}
+
 # Bounded ADB binary capture (exec-out, bukan shell): dipakai /screenshot.
 # Tidak lewat `adb shell`, jadi output biner apa adanya, tidak melalui tr -d '\r'.
 adb_bin() {
@@ -223,7 +242,7 @@ else
         # Top 5 proses pemakai RAM. Android berbeda build melabeli baris ini "Total PSS by
         # process:" atau "Total RSS by process:" (lihat catatan audit); keduanya diterima,
         # sudah urut menurun secara bawaan oleh dumpsys sehingga cukup ambil 5 baris pertama.
-        MEMPROC=$(adb_t "$ADB_ADDR" dumpsys meminfo 2>/dev/null)
+        MEMPROC=$(adb_t_opt 20 "$ADB_ADDR" dumpsys meminfo 2>/dev/null)
         TOP_RAW=$(printf '%s\n' "$MEMPROC" | awk '
           /Total (PSS|RSS) by process:/ { found=1; next }
           found && /^[[:space:]]*$/ { exit }

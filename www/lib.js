@@ -313,8 +313,10 @@
         return request('GET', '/screenshot?ip=' + encodeURIComponent(ip), undefined, 130000)
           .then(function (r) { return r.data; });
       },
+      /* dumpsys meminfo di dalamnya terukur bisa ~8 dtk secara alami di sebagian HP
+       * (budget server 20 dtk untuk panggilan itu saja); timeout klien diberi marjin. */
       optimize: function (ip) {
-        return request('GET', '/optimize?ip=' + encodeURIComponent(ip), undefined, 20000)
+        return request('GET', '/optimize?ip=' + encodeURIComponent(ip), undefined, 40000)
           .then(function (r) { return r.data; });
       },
       targets: function () {
