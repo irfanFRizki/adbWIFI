@@ -205,3 +205,14 @@ test('klien API terhadap server tiruan', async () => {
     server.close();
   }
 });
+
+test('pemakaian RAM dari detail.ram', () => {
+  const r = L.ramUsage({ total_kb: 3826256, available_kb: 1501140 });
+  assert.equal(r.pct, 61);
+  assert.equal(r.usedKb, 3826256 - 1501140);
+  assert.equal(r.freeKb, 1501140);
+  assert.equal(L.ramUsage(null), null);
+  assert.equal(L.ramUsage({ total_kb: 0, available_kb: 10 }), null);
+  assert.equal(L.ramUsage({ total_kb: 1000, available_kb: 'x' }), null);
+  assert.equal(L.ramUsage({ total_kb: 1000, available_kb: 2000 }).pct, 0);
+});

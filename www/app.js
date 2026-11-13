@@ -16,7 +16,13 @@
     fetchedAt: 0,
     error: null,
     samples: {},
-    detailIp: null
+    detailIp: null,
+    selectedIp: null,   // HP yang tampil di layar fokus
+    live: {},           // ip -> { status: loading|ok|error, detail, err, at } (RAM/CPU dari ADB)
+    auto: true,         // segarkan otomatis
+    busyIp: null,       // IP yang sedang disegarkan lewat tombol
+    enter: true,        // mainkan animasi masuk pada render berikutnya
+    enterUntil: 0       // render ulang ditunda sampai animasi masuk selesai
   };
   var inflight = false;
   var timer = null;
@@ -226,42 +232,247 @@
     return '<p class="note">HP tidak terjangkau dari router (mati, di luar jaringan ini, atau IP berubah).</p>';
   }
 
-  /* ---------- daftar ---------- */
+  /* ---------- fokus satu HP ---------- */
 
-  function cardHtml(dev) {
+  var RING_C = 276.5; // keliling cincin r=44
+  var ICON_REFRESH = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>';
+
+  function statusKind(dev) {
     var r = dev.router || {}, a = dev.adb || {};
-    var online = !!r.online, conn = a.status === 'connected';
-    var cls = 'card' + (online ? ' on' : '') + (online && !conn ? ' noadb' : '') + (state.error ? ' stale' : '');
-    return '<article class="' + cls + '" data-ip="' + esc(dev.ip) + '">' +
-      '<div class="card-head"><div><h2>' + esc(L.displayName(dev)) + '</h2><p class="mono sub">' + esc(dev.ip) + ':' + esc(dev.port_adb) +
-      (L.altName(dev) ? ' · <span style="white-space:nowrap">' + esc(L.altName(dev)) + '</span>' : '') + '</p></div>' +
-      '<div class="badges">' + (L.isCharging(dev) ? '<span class="badge chg">' + BOLT + 'CHARGE</span>' : '') +
-      badge(online ? 'ONLINE' : 'OFFLINE', online ? 'good' : 'bad') +
-      badge(conn ? 'ADB' : 'NO ADB', conn ? 'good' : (online ? 'warn' : '')) +
-      '<button type="button" class="mini-refresh" data-refresh-ip="' + esc(dev.ip) + '" title="Segarkan IP ini">' +
-        '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6a4 4 0 0 1 7.1-2.2L9 5h2L10 2 8 0l1.1 1.1A6 6 0 1 0 6 12H4a8 8 0 1 1 2-6z"/></svg>' +
-      '</button>' +
-      '</div></div>' +
-      metricsHtml(dev) + noteHtml(dev) + '</article>';
+    if (r.online && a.status === 'connected') return 'ok';
+    if (r.online) return 'warn';
+    return 'off';
   }
 
-  function renderSummary() {
-    var d = state.devices;
-    var on = d.filter(function (x) { return x.router && x.router.online; }).length;
-    var adb = d.filter(function (x) { return x.adb && x.adb.status === 'connected'; }).length;
-    function stat(cls, n, label) { return '<div class="stat ' + cls + '"><b>' + n + '</b><span>' + label + '</span></div>'; }
-    $('#summary').innerHTML = stat('', d.length, 'Target') + stat('g', on, 'Online') + stat('c', adb, 'ADB');
+  function selectedDev() {
+    var d = state.selectedIp ? findDev(state.selectedIp) : null;
+    if (!d && state.devices.length) { d = state.devices[0]; state.selectedIp = d.ip; }
+    return d;
   }
 
-  function renderList() {
-    var el = $('#list');
-    if (!state.devices.length) {
+  function batteryLevel(dev) {
+    var a = dev.adb || {};
+    if (a.status !== 'connected' || a.battery === undefined || a.battery === null || a.battery === '') return null;
+    var n = Number(a.battery);
+    return isNaN(n) ? null : n;
+  }
+
+  function renderChips() {
+    var el = $('#chips');
+    if (!state.devices.length) { el.innerHTML = ''; return; }
+    var sel = selectedDev();
+    el.innerHTML = state.devices.map(function (dev) {
+      var k = statusKind(dev), on = !!sel && sel.ip === dev.ip;
+      return '<button type="button" class="chip' + (on ? ' on' : '') + '" data-chip="' + esc(dev.ip) + '" aria-pressed="' + (on ? 'true' : 'false') + '">' +
+        '<span class="dot ' + k + (k === 'ok' ? ' live' : '') + '"></span>' + esc(L.displayName(dev)) + '</button>';
+    }).join('');
+  }
+
+  function ringHtml(bat, chg) {
+    var head = '<svg class="ring" width="104" height="104" viewBox="0 0 104 104" role="img" aria-label="' +
+      (bat === null ? 'Baterai tidak diketahui' : 'Baterai ' + bat + ' persen') + '">';
+    if (bat === null) {
+      return head + '<circle class="ring-empty" cx="52" cy="52" r="44"/><text class="ring-text" x="52" y="60" text-anchor="middle">&#8212;</text></svg>';
+    }
+    var dash = Math.round(Math.max(0, Math.min(100, bat)) / 100 * RING_C * 10) / 10;
+    var cls = chg ? 'chg' : (bat >= 50 ? '' : (bat >= 20 ? 'mid' : 'low'));
+    return head + '<circle class="ring-track" cx="52" cy="52" r="44"/>' +
+      '<circle class="ring-fill ' + cls + '" cx="52" cy="52" r="44" transform="rotate(-90 52 52)" style="--dash:' + dash + ';stroke-dasharray:' + dash + ' ' + RING_C + '"/>' +
+      '<text class="ring-text" x="52" y="60" text-anchor="middle">' + bat + '%</text></svg>';
+  }
+
+  function heroHtml(dev) {
+    var r = dev.router || {}, a = dev.adb || {};
+    var conn = a.status === 'connected';
+    var chg = L.isCharging(dev);
+    var lat = L.parseLatency(r.latency);
+    var latText = lat === null ? '—' : lat + ' ms';
+    var h = '<section class="hero-card">' + ringHtml(batteryLevel(dev), chg) + '<div class="hero-info">';
+    if (conn) {
+      var rssi = typeof a.wifi_rssi === 'number' ? a.wifi_rssi : null;
+      var src = L.chargeSourceText(a.charge_source);
+      h += '<h2>' + esc(a.model || L.displayName(dev)) + '</h2>' +
+        '<p>' + esc(L.displayName(dev)) + (a.android ? ' · Android ' + esc(a.android) : '') + '</p>' +
+        '<p class="mono">' + esc(dev.ip) + ':' + esc(dev.port_adb) + '</p>' +
+        '<p class="strong">' + (chg ? BOLT + 'Mengisi' + (src ? ' · ' + esc(src) : '') : (a.charging === false ? 'Tidak mengisi' : '')) +
+        ((chg || a.charging === false) ? ' · ' : '') + 'Layar ' + screenText(a.screen).toLowerCase() + '</p>' +
+        '<p>' + wifiIcon(L.wifiBars(rssi)) + esc(a.wifi_ssid || '—') + (rssi === null ? '' : ' · ' + rssi + ' dBm') + ' · ' + esc(latText) + '</p>';
+    } else {
+      h += '<h2>' + esc(L.displayName(dev)) + '</h2>' +
+        '<p class="mono">' + esc(dev.ip) + ':' + esc(dev.port_adb) + '</p>' +
+        (L.altName(dev) ? '<p>' + esc(L.altName(dev)) + '</p>' : '') +
+        '<p class="strong">' + (r.online ? 'Online · ADB belum tersambung' : 'Offline') + '</p>' +
+        (r.online ? '<p>Latensi ' + esc(latText) + '</p>' : '');
+    }
+    return h + '</div></section>';
+  }
+
+  function tile(label, valueHtml, subHtml, none) {
+    return '<div class="tile"><label>' + esc(label) + '</label><b' + (none ? ' class="none"' : '') + '>' + valueHtml + '</b>' +
+      (subHtml ? '<small>' + subHtml + '</small>' : '') + '</div>';
+  }
+
+  function tilesHtml(dev) {
+    var a = dev.adb || {};
+    var chg = L.isCharging(dev);
+    var bat = batteryLevel(dev);
+    var live = state.live[dev.ip];
+    var detail = live && live.detail ? live.detail : null;
+    var t = '';
+
+    t += typeof a.temp_c === 'number'
+      ? tile('Suhu', '<span class="temp-' + (L.tempLevel(a.temp_c) || 'ok') + '">' + esc(L.formatTemp(a.temp_c)) + '</span>', 'Baterai')
+      : tile('Suhu', '&#8212;', 'Baterai', true);
+    t += typeof a.voltage_mv === 'number'
+      ? tile('Tegangan', esc(L.formatVoltage(a.voltage_mv)), esc(a.voltage_mv) + ' mV')
+      : tile('Tegangan', '&#8212;', 'Baterai', true);
+    // Label mengisi/dipakai mengikuti status charging, bukan tanda current_ma (lihat CHANGELOG v0.7.0).
+    t += typeof a.current_ma === 'number'
+      ? tile('Arus', esc(L.formatCurrent(a.current_ma)), chg ? 'mengisi' : 'dipakai')
+      : tile('Arus', '&#8212;', 'Dibatasi Android', true);
+    if (chg) {
+      t += tile('Sisa waktu', '&#8212;', 'Sedang mengisi', true);
+    } else if (typeof a.avg_drain_pct_per_hour === 'number') {
+      var rem = L.estimateRemaining(bat, a.avg_drain_pct_per_hour);
+      t += tile('Sisa waktu', rem ? esc(rem) : '&#8212;', esc(L.formatDrain(a.avg_drain_pct_per_hour)), !rem);
+    } else {
+      t += tile('Sisa waktu', '&#8212;', 'Data belum cukup', true);
+    }
+
+    var loading = live && live.status === 'loading';
+    var ru = detail ? L.ramUsage(detail.ram) : null;
+    if (ru) {
+      t += tile('RAM terpakai', ru.pct + '%', esc(L.formatBytes(ru.freeKb * 1024)) + ' bebas dari ' + esc(L.formatBytes(ru.totalKb * 1024)));
+    } else {
+      t += tile('RAM terpakai', loading ? '&#8230;' : '&#8212;', loading ? 'Memuat lewat ADB' : (live && live.status === 'error' ? 'Gagal memuat' : 'Tekan Segarkan'), true);
+    }
+    var cpu = detail ? detail.cpu_percent : null;
+    if (typeof cpu === 'number') {
+      t += tile('CPU', cpu + '%', 'Sampel 1 detik');
+    } else {
+      t += tile('CPU', loading ? '&#8230;' : '&#8212;', loading ? 'Memuat lewat ADB' : (live && live.status === 'error' ? 'Gagal memuat' : 'Tekan Segarkan'), true);
+    }
+    return '<div class="tiles">' + t + '</div>';
+  }
+
+  function trafficHtml(dev) {
+    if (!dev.rxtx_available) return '<div class="traffic"><div class="now"><span class="sub">Trafik tidak tersedia</span></div></div>';
+    var rate = (state.samples[dev.ip] || {}).rate;
+    var now = rate
+      ? '<span class="dl">&#8595; ' + L.formatRate(rate.rx) + '</span> · <span class="ul">&#8593; ' + L.formatRate(rate.tx) + '</span>'
+      : '<span class="sub">menunggu sampel…</span>';
+    return '<div class="traffic"><div class="now">' + now + '</div><div class="tot">' +
+      '<span class="dl">&#8595; ' + L.formatBytes(dev.rx_bytes) + '</span> · <span class="ul">&#8593; ' + L.formatBytes(dev.tx_bytes) + '</span><br>sejak boot</div></div>';
+  }
+
+  var deferTimer = null;
+  function renderFocus(force) {
+    var el = $('#focus');
+    var dev = selectedDev();
+    if (!dev) {
+      el.className = 'focus';
       el.innerHTML = '<div class="empty">' + (configured()
         ? (state.error ? 'Belum ada data.' : 'Belum ada target. Tekan + untuk menambah IP HP yang ingin dipantau.')
         : 'Isi URL router dan token di pengaturan untuk mulai memantau.') + '</div>';
       return;
     }
-    el.innerHTML = state.devices.map(cardHtml).join('');
+    var enter = state.enter;
+    // Selama animasi masuk berjalan, render ulang (polling, RAM/CPU datang) ditunda sampai animasi selesai
+    // supaya animasinya tidak terpotong. Aksi pengguna memakai force.
+    var left = state.enterUntil - Date.now();
+    if (!enter && !force && left > 0) {
+      if (!deferTimer) deferTimer = setTimeout(function () { deferTimer = null; renderFocus(); }, left + 20);
+      return;
+    }
+    state.enter = false;
+    if (enter) state.enterUntil = Date.now() + 1400;
+    el.className = 'focus' + (state.error ? ' stale' : '') + (enter ? ' enter' : '');
+    var conn = dev.adb && dev.adb.status === 'connected';
+    var busy = state.busyIp === dev.ip;
+    var sec = Number(state.settings.interval) || 30;
+    var h = heroHtml(dev);
+    h += '<div class="actions"><button type="button" class="btn-refresh' + (busy ? ' busy' : '') + '" data-act="refresh"' + (busy ? ' disabled' : '') + '>' +
+      ICON_REFRESH + 'Segarkan HP ini</button>' +
+      '<button type="button" class="btn-auto" data-act="auto" aria-pressed="' + (state.auto ? 'true' : 'false') + '">' +
+      (state.auto ? 'Auto ' + sec + ' dtk' : 'Auto mati') + '</button></div>';
+    if (conn) {
+      h += tilesHtml(dev) + trafficHtml(dev);
+      var live = state.live[dev.ip];
+      h += '<div class="panel"><label>Aplikasi aktif</label><div class="val">' +
+        foregroundHtml(Object.assign({}, dev, { detail: live && live.detail ? live.detail : undefined })) + '</div></div>';
+    } else {
+      h += '<div class="panel">' + metricsHtml(dev, true) + noteHtml(dev) + '</div>';
+    }
+    h += '<button type="button" class="detail-link" data-act="detail">Detail lengkap, screenshot, dan optimasi</button>';
+    el.innerHTML = h;
+  }
+
+  /* RAM/CPU datang dari /status?detail=1 (±8 dtk via ADB): hanya untuk HP terpilih,
+     saat dipilih, saat pertama kali terhubung, dan saat tombol Segarkan ditekan. */
+  function liveNeeded(ip, mode) {
+    var dev = findDev(ip);
+    if (!dev || !dev.adb || dev.adb.status !== 'connected') return false;
+    var lv = state.live[ip];
+    if (lv && lv.status === 'loading') return false;
+    if (mode === 'force' || !lv) return true;
+    if (mode === 'select') return Date.now() - lv.at > 120000;
+    return false;
+  }
+
+  async function loadLive(ip) {
+    var prev = state.live[ip];
+    state.live[ip] = { status: 'loading', detail: prev ? prev.detail : null, at: Date.now() };
+    try {
+      var res = await api.detail(ip);
+      state.live[ip] = { status: 'ok', detail: res && res.detail ? res.detail : null, at: Date.now() };
+    } catch (e) {
+      state.live[ip] = { status: 'error', detail: state.live[ip].detail, err: L.errorMessage(e), at: Date.now() };
+    }
+    if (state.selectedIp === ip) renderFocus();
+  }
+
+  function selectDevice(ip) {
+    if (!findDev(ip) || ip === state.selectedIp) return;
+    state.selectedIp = ip;
+    storeSet('sel', ip);
+    state.enter = true;
+    if (liveNeeded(ip, 'select')) loadLive(ip); // set status loading secara sinkron sebelum render
+    renderChips();
+    renderFocus();
+    var chip = document.querySelector('.chip.on');
+    if (chip && chip.scrollIntoView) { try { chip.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); } catch (e) { /* abaikan */ } }
+  }
+
+  async function focusRefresh() {
+    var ip = state.selectedIp;
+    if (!ip || state.busyIp) return;
+    state.busyIp = ip;
+    renderFocus(true);
+    try {
+      await refreshIp(ip, null);
+      if (findDev(ip) && liveNeeded(ip, 'force')) {
+        var p = loadLive(ip);
+        renderFocus(true);
+        await p;
+      }
+    } finally {
+      state.busyIp = null;
+      renderFocus(true);
+    }
+  }
+
+  function toggleAuto() {
+    state.auto = !state.auto;
+    storeSet('auto', state.auto ? '1' : '0');
+    if (state.auto) {
+      startPolling();
+      refresh(false);
+    } else {
+      stopPolling();
+      if (fastTimer) { clearInterval(fastTimer); fastTimer = null; }
+      fastEnd = 0;
+    }
+    renderFocus(true);
   }
 
   function renderPulse() {
@@ -271,8 +482,8 @@
 
   function renderAll() {
     renderBanner();
-    renderSummary();
-    renderList();
+    renderChips();
+    renderFocus();
     renderPulse();
     if (state.detailIp) {
       var dev = findDev(state.detailIp);
@@ -316,6 +527,9 @@
       // Resume yang datang saat request berjalan jangan sampai hilang.
       if (resumeQueued) { resumeQueued = false; resumeCycle(); }
     }
+    // Tandai "memuat" RAM/CPU sebelum render supaya hanya ada satu render (animasi masuk tidak terpotong).
+    var sd = selectedDev();
+    if (sd && liveNeeded(sd.ip, 'poll')) loadLive(sd.ip);
     renderAll();
   }
 
@@ -347,6 +561,7 @@
 
   function startPolling() {
     stopPolling();
+    if (!state.auto) return;
     if (Date.now() >= fastEnd) {
       var sec = Number(state.settings.interval) || 30;
       timer = setInterval(function () { if (!document.hidden) refresh(false); }, sec * 1000);
@@ -370,9 +585,9 @@
     if (inflight) { resumeQueued = true; return; }
     if (!configured() || document.hidden) return;
     stopPolling();
-    fastEnd = Date.now() + 60000;
+    if (state.auto) fastEnd = Date.now() + 60000;
     refresh(false);
-    startFastPolling();
+    if (state.auto) startFastPolling();
   }
 
   document.addEventListener('visibilitychange', function () {
@@ -585,15 +800,18 @@
     }
   });
 
-  $('#list').addEventListener('click', function (e) {
-    var rbtn = e.target.closest ? e.target.closest('[data-refresh-ip]') : null;
-    if (rbtn) {
-      e.stopPropagation();
-      refreshIp(rbtn.getAttribute('data-refresh-ip'), rbtn);
-      return;
-    }
-    var card = e.target.closest ? e.target.closest('.card') : null;
-    if (card) openDetail(card.getAttribute('data-ip'));
+  $('#focus').addEventListener('click', function (e) {
+    var t = e.target.closest ? e.target.closest('[data-act]') : null;
+    if (!t) return;
+    var act = t.getAttribute('data-act');
+    if (act === 'refresh') focusRefresh();
+    else if (act === 'auto') toggleAuto();
+    else if (act === 'detail' && state.selectedIp) openDetail(state.selectedIp);
+  });
+
+  $('#chips').addEventListener('click', function (e) {
+    var c = e.target.closest ? e.target.closest('[data-chip]') : null;
+    if (c) selectDevice(c.getAttribute('data-chip'));
   });
 
   /* ---------- tambah IP ---------- */
@@ -703,6 +921,7 @@
     ]);
     state.devices = [];
     state.samples = {};
+    state.live = {};
     state.error = null;
     state.tsChangedAt = 0;
     toast('Pengaturan disimpan.');
@@ -714,11 +933,13 @@
   /* ---------- mulai ---------- */
 
   async function init() {
-    var v = await Promise.all([storeGet('url1'), storeGet('url2'), storeGet('token'), storeGet('interval'), storeGet('url3'), storeGet('cfkey')]);
+    var v = await Promise.all([storeGet('url1'), storeGet('url2'), storeGet('token'), storeGet('interval'), storeGet('url3'), storeGet('cfkey'), storeGet('sel'), storeGet('auto')]);
     state.settings = {
       url1: v[0] || '', url2: v[1] || '', url3: v[4] || '', token: v[2] || '', cfkey: v[5] || '',
-      interval: [15, 30, 60].indexOf(Number(v[3])) !== -1 ? Number(v[3]) : 30
+      interval: [10, 15, 30, 60].indexOf(Number(v[3])) !== -1 ? Number(v[3]) : 30
     };
+    state.selectedIp = v[6] || null;
+    state.auto = v[7] !== '0';
     $('#verLabel').textContent = 'v' + (window.APP_VERSION || 'dev');
     renderAll();
     if (configured()) {
