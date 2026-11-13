@@ -154,6 +154,16 @@
     return '±' + (h > 0 ? h + ' jam ' : '') + m + ' mnt';
   }
 
+  /* Pemakaian RAM dari objek detail.ram ({total_kb, available_kb}); null bila data tak valid. */
+  function ramUsage(ram) {
+    if (!ram) return null;
+    var total = Number(ram.total_kb), avail = Number(ram.available_kb);
+    if (!(total > 0) || isNaN(avail)) return null;
+    var free = Math.min(Math.max(avail, 0), total);
+    var used = total - free;
+    return { usedKb: used, freeKb: free, totalKb: total, pct: Math.round(used / total * 100) };
+  }
+
   /* foreground_app bisa ada di adb.* (cache) atau detail.* (live). Hasil: {text, pkg} atau null. */
   function foregroundApp(dev) {
     var fa = null;
@@ -369,6 +379,7 @@
     formatCurrent: formatCurrent,
     formatDrain: formatDrain,
     estimateRemaining: estimateRemaining,
+    ramUsage: ramUsage,
     foregroundApp: foregroundApp,
     computeRate: computeRate,
     updateSample: updateSample,

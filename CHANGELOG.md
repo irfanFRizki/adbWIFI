@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.8.0
+
+- UI: beranda diganti jadi **"Fokus Satu HP"** dan seluruh aplikasi memakai tema gelap.
+  Satu HP tampil penuh (cincin baterai, model, status mengisi, layar, WiFi, latensi),
+  HP lain dipilih lewat chip di atas (titik hijau = online + ADB, kuning = online tanpa
+  ADB, abu = offline; pilihan terakhir diingat). Enam petak metrik: suhu, tegangan, arus,
+  sisa waktu, RAM, CPU; di bawahnya kecepatan dan total trafik, aplikasi aktif, dan
+  tombol ke lembar detail (screenshot, optimasi, daftar aplikasi, hapus target) yang tidak berubah.
+- Tombol **Segarkan HP ini** (POST /refresh untuk IP terpilih, lalu RAM/CPU dari
+  `/status?detail=1`) dan toggle **Auto N dtk** (menyala/mati, diingat; interval tetap dari
+  Pengaturan). RAM/CPU hanya diambil untuk HP terpilih (saat dipilih, saat pertama
+  terhubung, dan saat tombol ditekan) karena butuh ±8 dtk lewat ADB.
+- Animasi CSS: kartu masuk bertahap, cincin baterai terisi, titik status berdenyut, ikon
+  refresh berputar saat memuat. Animasi masuk hanya dimainkan saat HP dipilih/pertama
+  kali tampil (tidak diulang tiap polling) dan dimatikan oleh `prefers-reduced-motion`.
+- `HPLib.ramUsage()` (+ tes) menghitung pemakaian RAM dari `detail.ram`.
+- Fix kecil: interval 10 detik di Pengaturan sekarang ikut tersimpan saat aplikasi dibuka ulang.
+
 ## v0.7.0
 
 - Fitur: **arus baterai (`current_ma`) untuk HP Android 10+ yang sysfs-nya diblokir**.
