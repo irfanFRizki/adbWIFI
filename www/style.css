@@ -140,11 +140,17 @@ button:active:not(:disabled) { transform: scale(.94); }
 .panel { padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-sm); }
 .panel label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 3px; }
 .panel .val { font-size: 14px; font-weight: 600; word-break: break-word; }
-.detail-link {
+.tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.btn-tool {
   min-height: 48px; border-radius: var(--r-sm); cursor: pointer; font-weight: 600; font-size: 14px;
-  background: transparent; border: 1px solid #2f3744; color: var(--text);
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--panel); border: 1px solid #2f3744; color: var(--text);
 }
-.detail-link:active { background: var(--primary-dim); }
+.btn-tool:active:not(:disabled) { background: var(--primary-dim); }
+.btn-tool:disabled { opacity: .7; }
+.btn-tool.busy svg { animation: spin .8s linear infinite; }
+.panel.result .shot-img { margin-top: 8px; max-height: 70vh; object-fit: contain; }
+.panel.result .skeleton { margin-top: 8px; }
 
 /* animasi masuk (hanya saat HP dipilih / pertama kali) */
 @keyframes fadeup { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
@@ -220,7 +226,6 @@ button:active:not(:disabled) { transform: scale(.94); }
 .btn.primary { background: var(--primary); color: var(--on-primary); }
 .btn.danger { color: var(--red); background: var(--red-bg); }
 .btn.ghost { background: transparent; border: 1px solid #2f3744; }
-.btn.small[data-action] { margin-left: 0; }
 .sheet-foot .btn { padding: 0 12px; font-size: 13px; }
 .btn:disabled { opacity: .5; }
 
