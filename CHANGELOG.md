@@ -15,6 +15,9 @@
 - Animasi CSS: kartu masuk bertahap, cincin baterai terisi, titik status berdenyut, ikon
   refresh berputar saat memuat. Animasi masuk hanya dimainkan saat HP dipilih/pertama
   kali tampil (tidak diulang tiap polling) dan dimatikan oleh `prefers-reduced-motion`.
+- Layar utama hanya punya dua tombol alat: **Screenshot** dan **Cek performa** (hasil tampil langsung
+  di bawahnya, per HP). Lembar detail lengkap (daftar aplikasi, hapus target) dibuka dengan menahan
+  chip HP.
 - `HPLib.ramUsage()` (+ tes) menghitung pemakaian RAM dari `detail.ram`.
 - Fix kecil: interval 10 detik di Pengaturan sekarang ikut tersimpan saat aplikasi dibuka ulang.
 
