@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.0
+
+- **Mode Live**: tombol baru "Live · performa waktu nyata" di layar fokus membuka lembar
+  berisi gauge dan angka yang diperbarui tiap 2 dtk (pilihan 1/2/5 dtk): CPU, RAM, baterai
+  (level, arus, suhu, tegangan, status), jaringan (unduh/unggah, ping, sinyal WiFi), serta
+  layar dan aplikasi aktif. Polling hanya berjalan selama lembar terbuka dan berhenti saat
+  ditutup atau aplikasi ke latar.
+- Router: endpoint baru `GET /live?ip=` (satu panggilan ADB ringan, counter mentah, kunci
+  per-HP, batas 5 dtk). Lihat `docs/API.md`. Router wajib diperbarui agar Live bekerja.
+- Perhitungan CPU/jaringan memakai uptime HP sebagai dasar waktu; nilai yang belum bisa
+  dihitung (sampel pertama, HP reboot) tampil "—", bukan 0.
+
 ## v0.8.0
 
 - UI: beranda diganti jadi **"Fokus Satu HP"** dan seluruh aplikasi memakai tema gelap.

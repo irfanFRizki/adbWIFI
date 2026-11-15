@@ -60,6 +60,27 @@ Seperti di atas, ditambah objek `detail` yang diambil **langsung dari HP lewat A
 - `detail` bernilai `null` bila ADB target tidak terhubung.
 - `detail=1` tanpa `ip` → `400 {"error":"detail_requires_ip"}`.
 
+### `GET /live?ip=<ip>[&full=1]`
+Satu sampel ringan untuk **mode Live** di aplikasi (dipanggil tiap 1–5 dtk selama layar Live terbuka). Satu panggilan ADB, tanpa state di router: yang dikembalikan counter mentah dan klien yang menghitung selisihnya (CPU %, kecepatan jaringan, perkiraan arus). `full=1` menambah bagian lambat (`slow`: layar, WiFi, aplikasi aktif); aplikasi memintanya tiap sampel ke-5.
+
+```json
+{ "ok": true, "ip": "192.168.7.177", "ts": 1794676820, "up": 12345.67,
+  "cpu": { "total": 6378, "idle": 5040 },
+  "ram": { "total_kb": 3800000, "available_kb": 1900000 },
+  "net": { "rx": 123456789, "tx": 987654 },
+  "ping_ms": 3.41,
+  "battery": { "level": 57, "status": 2, "charging": true, "source": "ac", "temp_c": 30.1,
+               "voltage_mv": 4012, "charge_counter_uah": 2500000, "max_charging_ua": 500000 },
+  "current": { "ma": -450.0, "source": "sysfs", "cache_ma": 1125.0, "cache_source": "estimate" },
+  "slow": { "screen": "Awake", "rssi": -57, "ssid": "RumahNet",
+            "foreground": { "package": "com.whatsapp", "label": "WhatsApp" } } }
+```
+
+- `up` = uptime HP (detik); selisih waktu dihitung dari sini. `cpu`/`net` adalah counter kumulatif (`/proc/stat` baris `cpu`, `/proc/net/dev` `wlan0`).
+- `current.ma` terisi hanya bila sysfs `current_now` terbaca (satuan mengikuti `/etc/hpmon/current-unit.conf`); bila `null`, klien memperkirakan dari `battery.charge_counter_uah`.
+- Satu permintaan per HP pada satu waktu: bila sampel sebelumnya masih berjalan → `429 {"error":"busy"}` (klien melewati siklus). Batas ADB 5 dtk → `504 {"error":"adb_timeout"}`.
+- `400` → `detail_requires_ip`; `404` → `not_found`; `409` → `adb_not_connected`.
+
 ### `GET /targets`
 Daftar konfigurasi target.
 
@@ -89,6 +110,8 @@ Menghapus target. Body: `{"ip":"192.168.7.188"}`. Berhasil → `{"ok":true}`.
 | 404 | Endpoint atau IP tidak dikenal (`not_found`) |
 | 405 | Metode HTTP salah (`method_not_allowed`) |
 | 409 | IP sudah terdaftar (`ip_duplicate`) |
+| 429 | `/live` untuk HP ini masih berjalan (`busy`) |
+| 504 | ADB tidak menjawab dalam batas waktu (`adb_timeout`) |
 
 ## Skema data
 

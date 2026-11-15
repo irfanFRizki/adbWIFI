@@ -93,6 +93,29 @@ function start(port) {
           top_apps: [{ kb: 58315, label: 'com.google.android.gms (pid 1234)' }, { kb: 45331, label: 'system (pid 567)' }]
         });
       }
+      if (route === '/live' && req.method === 'GET') {
+        const ip = url.searchParams.get('ip');
+        const t = state.targets.find((x) => x.ip === ip);
+        if (!t) return send(404, { error: 'not_found', ip });
+        const d = deviceFor(t, now, state);
+        if (d.adb.status !== 'connected') return send(409, { error: 'adb_not_connected' });
+        if (state.liveBusy) return send(429, { error: 'busy' });
+        if (state.liveTimeout) return send(504, { error: 'adb_timeout' });
+        // Counter mentah yang naik tiap panggilan, seperti /proc di HP sungguhan.
+        const n = (state.liveN = (state.liveN || 0) + 1);
+        const out = {
+          ok: true, ip, ts: Math.floor(now / 1000), up: 1000 + n * 2,
+          cpu: { total: n * 400, idle: n * 400 - n * 150 },
+          ram: { total_kb: 3826256, available_kb: 1501140 },
+          net: { rx: n * 200000, tx: n * 20000 },
+          ping_ms: 3.4,
+          battery: { level: 57, status: 2, charging: true, source: 'ac', temp_c: 30.1, voltage_mv: 4012, charge_counter_uah: 2500000, max_charging_ua: 500000 },
+          current: { ma: state.liveSysfs === undefined ? -450 : state.liveSysfs, source: 'sysfs', cache_ma: null, cache_source: null },
+          slow: url.searchParams.get('full') === '1'
+            ? { screen: 'Awake', rssi: -57, ssid: 'RumahNet', foreground: { package: 'com.whatsapp', label: 'WhatsApp' } } : null
+        };
+        return send(200, out);
+      }
       if (route === '/targets' && req.method === 'GET') return send(200, state.targets);
       if (route === '/targets/add' || route === '/targets/delete') {
         if (req.method !== 'POST') return send(405, { error: 'method_not_allowed' });

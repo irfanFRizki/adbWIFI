@@ -90,6 +90,7 @@
     if (!id) return;
     $('#' + id).classList.add('hidden');
     if (id === 'layerDetail') { state.detailIp = null; detailSeq++; }
+    if (id === 'layerLive') stopLive();
   });
   document.addEventListener('click', function (e) {
     if (e.target.closest && e.target.closest('[data-close]')) backLayer();
@@ -696,6 +697,7 @@
   /* ---------- screenshot & cek performa (tombol di layar utama, manual) ---------- */
 
   var ICON_SHOT = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>';
+  var ICON_LIVE = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>';
   var ICON_PERF = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg>';
 
   function toolState(ip, kind) {
@@ -708,7 +710,8 @@
     var shBusy = !!sh && sh.status === 'loading', opBusy = !!op && op.status === 'loading';
     var h = '<div class="tools">' +
       '<button type="button" class="btn-tool' + (shBusy ? ' busy' : '') + '" data-act="shot"' + (shBusy ? ' disabled' : '') + '>' + ICON_SHOT + 'Screenshot</button>' +
-      '<button type="button" class="btn-tool' + (opBusy ? ' busy' : '') + '" data-act="optim"' + (opBusy ? ' disabled' : '') + '>' + ICON_PERF + 'Cek performa</button></div>';
+      '<button type="button" class="btn-tool' + (opBusy ? ' busy' : '') + '" data-act="optim"' + (opBusy ? ' disabled' : '') + '>' + ICON_PERF + 'Cek performa</button>' +
+      '<button type="button" class="btn-tool btn-live" data-act="live">' + ICON_LIVE + 'Live · performa waktu nyata</button></div>';
     if (sh) h += '<div class="panel result">' + shotResultHtml(sh) + '</div>';
     if (op) h += '<div class="panel result">' + optimResultHtml(op) + '</div>';
     return h;
@@ -778,6 +781,135 @@
     if (state.selectedIp === ip) renderFocus(true);
   }
 
+
+  /* ---------- Mode Live: performa waktu nyata ---------- */
+
+  var live = { ip: null, run: 0, st: null, n: 0, ok: false };
+
+  function gaugeHtml(k, name) {
+    return '<div class="lv-g" data-g="' + k + '">' +
+      '<svg class="ring" viewBox="0 0 104 104" role="img" aria-label="' + name + '">' +
+      '<circle class="ring-track" cx="52" cy="52" r="44"/>' +
+      '<circle class="ring-fill" data-fill cx="52" cy="52" r="44" transform="rotate(-90 52 52)" style="stroke-dasharray:0 ' + RING_C + '"/>' +
+      '<text class="ring-text" data-t x="52" y="60" text-anchor="middle">&#8212;</text></svg>' +
+      '<div class="lv-name">' + name + '</div><div class="lv-sub" data-s>&nbsp;</div></div>';
+  }
+  function numHtml(k, label, cls) {
+    return '<div class="lv-n' + (cls ? ' ' + cls : '') + '"><b data-n="' + k + '">&#8212;</b><span>' + label + '</span></div>';
+  }
+
+  function liveDom() {
+    return '<div class="lv-sec"><label>CPU &amp; RAM</label><div class="lv-gauges">' +
+        gaugeHtml('cpu', 'CPU') + gaugeHtml('ram', 'RAM') + '</div></div>' +
+      '<div class="lv-sec"><label>Baterai</label><div class="lv-gauges">' + gaugeHtml('bat', 'Baterai') +
+        numHtml('cur', 'Arus (+ mengisi / − dipakai)', 'big') + '</div><div class="lv-rows" style="margin-top:10px">' +
+        numHtml('temp', 'Suhu') + numHtml('volt', 'Tegangan') + numHtml('chg', 'Status', 'wide') + '</div></div>' +
+      '<div class="lv-sec"><label>Jaringan</label><div class="lv-rows">' +
+        numHtml('rx', '↓ Unduh') + numHtml('tx', '↑ Unggah') + numHtml('ping', 'Ping ke router') + numHtml('rssi', 'Sinyal WiFi') + '</div></div>' +
+      '<div class="lv-sec"><label>Layar &amp; aplikasi aktif</label><div class="lv-rows">' +
+        numHtml('screen', 'Layar') + numHtml('app', 'Aplikasi aktif', 'wide') + '</div></div>';
+  }
+
+  function setGauge(k, pct, text, sub, level) {
+    var g = $('#lvBody [data-g="' + k + '"]');
+    if (!g) return;
+    var fill = g.querySelector('[data-fill]');
+    var ok = typeof pct === 'number' && !isNaN(pct);
+    var dash = ok ? Math.round(Math.max(0, Math.min(100, pct)) / 100 * RING_C * 10) / 10 : 0;
+    fill.setAttribute('style', 'stroke-dasharray:' + dash + ' ' + RING_C);
+    fill.setAttribute('class', 'ring-fill' + (level ? ' ' + level : ''));
+    g.querySelector('[data-t]').textContent = ok ? Math.round(pct) + '%' : '—';
+    g.querySelector('[data-s]').textContent = sub || ' ';
+  }
+  function setNum(k, text) {
+    var el = $('#lvBody [data-n="' + k + '"]');
+    if (el && el.textContent !== text) el.textContent = text;
+  }
+
+  function renderLive(v, raw) {
+    var b = v.battery || {};
+    setGauge('cpu', v.cpu, '', v.cpu === null ? 'menghitung…' : '', L.loadLevel(v.cpu));
+    if (v.ram) setGauge('ram', v.ram.pct, '', L.formatBytes(v.ram.usedKb * 1024) + ' / ' + L.formatBytes(v.ram.totalKb * 1024), L.loadLevel(v.ram.pct));
+    else setGauge('ram', null);
+    var lvl = typeof b.level === 'number' ? b.level : null;
+    setGauge('bat', lvl, '', b.charging ? 'Mengisi' : 'Tidak mengisi', b.charging ? 'cyan' : (lvl !== null && lvl < 20 ? 'hot' : (lvl !== null && lvl < 50 ? 'warm' : '')));
+    setNum('cur', v.current ? L.formatCurrent(v.current.ma) : '—');
+    setNum('temp', L.formatTemp(b.temp_c));
+    setNum('volt', L.formatVoltage(b.voltage_mv));
+    setNum('chg', b.charging === true ? 'Mengisi' + (L.chargeSourceText(b.source) ? ' · ' + L.chargeSourceText(b.source) : '') : (b.charging === false ? 'Dipakai' : '—'));
+    setNum('rx', L.formatRate(v.rx));
+    setNum('tx', L.formatRate(v.tx));
+    setNum('ping', v.ping === null ? '—' : Math.round(v.ping * 10) / 10 + ' ms');
+    var sl = v.slow;
+    if (sl) {
+      // bagian lambat hanya datang tiap beberapa sampel: tampilkan nilai terakhir di antaranya
+      live.slow = sl;
+    }
+    sl = live.slow;
+    if (sl) {
+      setNum('rssi', typeof sl.rssi === 'number' ? sl.rssi + ' dBm' : '—');
+      var sc = sl.screen === 'Awake' ? 'Menyala' : (sl.screen === 'Asleep' ? 'Tidur' : (sl.screen === 'Dozing' ? 'Doze' : (sl.screen || '—')));
+      setNum('screen', sc);
+      var fg = sl.foreground || {};
+      setNum('app', fg.label || fg.package || '—');
+    }
+  }
+
+  function setLiveStatus(kind, text) {
+    var el = $('#lvStatus');
+    el.className = 'live-status' + (kind ? ' ' + kind : '');
+    el.textContent = text;
+  }
+
+  function sleepMs(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  async function liveLoop(run) {
+    var fails = 0;
+    while (live.run === run) {
+      if (document.hidden) { await sleepMs(500); continue; }
+      var t0 = Date.now();
+      var every = Number($('#lvEvery').value) || 2;
+      var skipWait = false;
+      try {
+        var res = await api.live(live.ip, live.n % 5 === 0);
+        if (live.run !== run) return;
+        if (!res || res.ok !== true) throw new L.ApiError('http', 'respons tidak valid', 0, 'invalid');
+        live.n++; fails = 0;
+        renderLive(L.liveStep(live.st, res), res);
+        setLiveStatus('ok', 'Live');
+      } catch (e) {
+        if (live.run !== run) return;
+        if (e && e.code === 'busy') { skipWait = true; }
+        else {
+          fails++;
+          setLiveStatus('err', fails > 1 ? 'Terputus · ' + L.errorMessage(e) : 'Mencoba lagi…');
+          if (e && (e.kind === 'auth' || e.code === 'adb_not_connected' || e.code === 'not_found')) { setLiveStatus('err', L.errorMessage(e)); return; }
+        }
+      }
+      var wait = skipWait ? 400 : Math.max(0, Math.max(every, fails ? Math.min(2 + fails, 6) : every) * 1000 - (Date.now() - t0));
+      await sleepMs(wait);
+    }
+  }
+
+  function openLive() {
+    var ip = state.selectedIp;
+    var dev = ip && findDev(ip);
+    if (!dev || !dev.adb || dev.adb.status !== 'connected') return;
+    live.ip = ip; live.st = L.createLiveState(); live.n = 0; live.slow = null;
+    $('#lvTitle').textContent = 'Live · ' + L.displayName(dev);
+    $('#lvSub').textContent = ip;
+    $('#lvBody').innerHTML = liveDom();
+    setLiveStatus('', 'Menghubungkan…');
+    openLayer('layerLive');
+    liveLoop(++live.run);
+  }
+  function stopLive() { live.run++; live.ip = null; }
+
+  document.addEventListener('visibilitychange', function () {
+    // loop menunggu sendiri saat tersembunyi; ulang pembaruan cepat saat kembali
+    if (!document.hidden && live.ip) setLiveStatus('', 'Melanjutkan…');
+  });
+
   // Tahan lama pada chip HP membuka lembar detail (detail lengkap, daftar aplikasi, hapus target).
   var pressTimer = null, pressFired = false;
   function chipPress(e) {
@@ -828,6 +960,7 @@
     else if (act === 'auto') toggleAuto();
     else if (act === 'shot') runTool('shot');
     else if (act === 'optim') runTool('optim');
+    else if (act === 'live') openLive();
   });
 
   $('#chips').addEventListener('click', function (e) {

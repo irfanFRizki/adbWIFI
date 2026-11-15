@@ -200,6 +200,73 @@
     return s.rate;
   }
 
+
+  /* ---------- mode Live: hitung dari counter mentah /live ---------- */
+
+  function createLiveState() {
+    return { prev: null, base: null, est: null, estAt: 0, seq: 0 };
+  }
+
+  function _num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
+
+  /* Satu sampel /live -> nilai siap tampil. Selisih dihitung terhadap sampel sebelumnya pada `st`
+   * (dibuat createLiveState). Waktu antar-sampel diambil dari uptime HP (bukan jam router/jaringan),
+   * jadi jitter jaringan tidak mengubah angka. Mengembalikan null untuk nilai yang belum bisa dihitung
+   * (sampel pertama, HP reboot, selisih tak masuk akal) -- bukan 0. */
+  function liveStep(st, s) {
+    var prev = st.prev;
+    st.prev = s;
+    var out = { cpu: null, ram: null, rx: null, tx: null, ping: _num(s.ping_ms), battery: s.battery || null, current: null, slow: s.slow || null };
+
+    var ram = s.ram ? ramUsage(s.ram) : null;
+    out.ram = ram;
+
+    var dt = null;
+    if (prev && _num(s.up) !== null && _num(prev.up) !== null) {
+      dt = s.up - prev.up;
+      if (!(dt > 0 && dt <= 30)) dt = null; // reboot / sampel terlalu jauh
+    }
+    if (dt !== null && s.cpu && prev.cpu) {
+      var dT = s.cpu.total - prev.cpu.total, dI = s.cpu.idle - prev.cpu.idle;
+      if (dT > 0 && dI >= 0 && dI <= dT) out.cpu = Math.round((1 - dI / dT) * 1000) / 10;
+    }
+    if (dt !== null && s.net && prev.net && _num(s.net.rx) !== null && _num(prev.net.rx) !== null) {
+      var drx = s.net.rx - prev.net.rx, dtx = s.net.tx - prev.net.tx;
+      if (drx >= 0 && dtx >= 0) { out.rx = drx / dt; out.tx = dtx / dt; }
+    }
+
+    // Arus: sysfs bila ada. Kalau tidak, perkiraan dari selisih charge counter (uAh); baterai
+    // Android mengubah counter ini hanya sesekali, jadi nilai terakhir dipertahankan sampai counter
+    // berubah lagi (maks 3 menit). Terakhir, nilai cache router.
+    var cur = s.current || {};
+    if (_num(cur.ma) !== null) {
+      out.current = { ma: cur.ma, source: 'sysfs' };
+    } else {
+      var cc = s.battery ? _num(s.battery.charge_counter_uah) : null;
+      if (cc !== null && _num(s.up) !== null) {
+        if (!st.base || s.up < st.base.up) {
+          st.base = { cc: cc, up: s.up }; st.est = null;
+        } else if (cc !== st.base.cc) {
+          var d = s.up - st.base.up;
+          if (d >= 10 && d <= 1800) {
+            var v = (cc - st.base.cc) * 3.6 / d;
+            if (Math.abs(v) >= 1) { st.est = v; st.estAt = s.up; }
+          }
+          st.base = { cc: cc, up: s.up };
+        }
+      }
+      if (st.est !== null && s.up - st.estAt <= 180) out.current = { ma: st.est, source: 'estimate' };
+      else if (_num(cur.cache_ma) !== null) out.current = { ma: cur.cache_ma, source: cur.cache_source || 'cache' };
+    }
+    return out;
+  }
+
+  /* Persen -> tingkat warna gauge: 'ok' < 60, 'warm' 60–84, 'hot' >= 85. */
+  function loadLevel(pct) {
+    if (typeof pct !== 'number' || isNaN(pct)) return '';
+    return pct >= 85 ? 'hot' : (pct >= 60 ? 'warm' : 'ok');
+  }
+
   /* ---------- klien API ---------- */
 
   function ApiError(kind, message, status, code) {
@@ -224,7 +291,9 @@
     adb_not_connected: 'ADB belum terhubung ke HP ini.',
     screencap_timeout: 'HP tidak merespons tangkapan layar tepat waktu. Coba lagi atau bangunkan layarnya dulu.',
     empty_capture: 'Tangkapan layar kosong. Coba lagi.',
-    encode_failed: 'Gagal memproses hasil tangkapan layar di router.'
+    encode_failed: 'Gagal memproses hasil tangkapan layar di router.',
+    adb_timeout: 'HP tidak merespons tepat waktu (ADB lambat atau layar HP tidur dalam).',
+    busy: 'Sampel sebelumnya masih berjalan.'
   };
 
   function errorMessage(err) {
@@ -329,6 +398,11 @@
         return request('GET', '/optimize?ip=' + encodeURIComponent(ip), undefined, 40000)
           .then(function (r) { return r.data; });
       },
+      /* Satu sampel ringan untuk mode Live. full=true menambah bagian lambat (layar, WiFi, aplikasi aktif). */
+      live: function (ip, full) {
+        return request('GET', '/live?ip=' + encodeURIComponent(ip) + (full ? '&full=1' : ''), undefined, 9000)
+          .then(function (r) { return r.data; });
+      },
       targets: function () {
         return request('GET', '/targets', undefined, 15000).then(function (r) { return r.data; });
       },
@@ -383,6 +457,9 @@
     foregroundApp: foregroundApp,
     computeRate: computeRate,
     updateSample: updateSample,
+    createLiveState: createLiveState,
+    liveStep: liveStep,
+    loadLevel: loadLevel,
     ApiError: ApiError,
     errorMessage: errorMessage,
     createApi: createApi,
