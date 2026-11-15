@@ -2,11 +2,12 @@
 
 ## v0.9.0
 
-- **Mode Live**: tombol baru "Live · performa waktu nyata" di layar fokus membuka lembar
-  berisi gauge dan angka yang diperbarui tiap 2 dtk (pilihan 1/2/5 dtk): CPU, RAM, baterai
-  (level, arus, suhu, tegangan, status), jaringan (unduh/unggah, ping, sinyal WiFi), serta
-  layar dan aplikasi aktif. Polling hanya berjalan selama lembar terbuka dan berhenti saat
-  ditutup atau aplikasi ke latar.
+- **Performa langsung di dashboard**: HP terpilih yang terhubung ADB otomatis menampilkan panel
+  gauge dan angka (CPU, RAM, baterai: level/arus/suhu/tegangan/status/sisa waktu, jaringan:
+  unduh/unggah/ping/sinyal WiFi, layar dan aplikasi aktif) yang diperbarui tiap 2 dtk (pilihan
+  1/2/5 dtk, diingat). Tanpa tombol; polling berhenti saat aplikasi ke latar atau HP berganti
+  ke yang tidak terhubung. Tombol "Cek performa" dan petak RAM/CPU lama dihapus; di bawahnya
+  tinggal tombol Screenshot.
 - Router: endpoint baru `GET /live?ip=` (satu panggilan ADB ringan, counter mentah, kunci
   per-HP, batas 5 dtk). Lihat `docs/API.md`. Router wajib diperbarui agar Live bekerja.
 - Perhitungan CPU/jaringan memakai uptime HP sebagai dasar waktu; nilai yang belum bisa

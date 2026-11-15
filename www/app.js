@@ -90,7 +90,6 @@
     if (!id) return;
     $('#' + id).classList.add('hidden');
     if (id === 'layerDetail') { state.detailIp = null; detailSeq++; }
-    if (id === 'layerLive') stopLive();
   });
   document.addEventListener('click', function (e) {
     if (e.target.closest && e.target.closest('[data-close]')) backLayer();
@@ -314,49 +313,6 @@
       (subHtml ? '<small>' + subHtml + '</small>' : '') + '</div>';
   }
 
-  function tilesHtml(dev) {
-    var a = dev.adb || {};
-    var chg = L.isCharging(dev);
-    var bat = batteryLevel(dev);
-    var live = state.live[dev.ip];
-    var detail = live && live.detail ? live.detail : null;
-    var t = '';
-
-    t += typeof a.temp_c === 'number'
-      ? tile('Suhu', '<span class="temp-' + (L.tempLevel(a.temp_c) || 'ok') + '">' + esc(L.formatTemp(a.temp_c)) + '</span>', 'Baterai')
-      : tile('Suhu', '&#8212;', 'Baterai', true);
-    t += typeof a.voltage_mv === 'number'
-      ? tile('Tegangan', esc(L.formatVoltage(a.voltage_mv)), esc(a.voltage_mv) + ' mV')
-      : tile('Tegangan', '&#8212;', 'Baterai', true);
-    // Label mengisi/dipakai mengikuti status charging, bukan tanda current_ma (lihat CHANGELOG v0.7.0).
-    t += typeof a.current_ma === 'number'
-      ? tile('Arus', esc(L.formatCurrent(a.current_ma)), chg ? 'mengisi' : 'dipakai')
-      : tile('Arus', '&#8212;', 'Dibatasi Android', true);
-    if (chg) {
-      t += tile('Sisa waktu', '&#8212;', 'Sedang mengisi', true);
-    } else if (typeof a.avg_drain_pct_per_hour === 'number') {
-      var rem = L.estimateRemaining(bat, a.avg_drain_pct_per_hour);
-      t += tile('Sisa waktu', rem ? esc(rem) : '&#8212;', esc(L.formatDrain(a.avg_drain_pct_per_hour)), !rem);
-    } else {
-      t += tile('Sisa waktu', '&#8212;', 'Data belum cukup', true);
-    }
-
-    var loading = live && live.status === 'loading';
-    var ru = detail ? L.ramUsage(detail.ram) : null;
-    if (ru) {
-      t += tile('RAM terpakai', ru.pct + '%', esc(L.formatBytes(ru.freeKb * 1024)) + ' bebas dari ' + esc(L.formatBytes(ru.totalKb * 1024)));
-    } else {
-      t += tile('RAM terpakai', loading ? '&#8230;' : '&#8212;', loading ? 'Memuat lewat ADB' : (live && live.status === 'error' ? 'Gagal memuat' : 'Tekan Segarkan'), true);
-    }
-    var cpu = detail ? detail.cpu_percent : null;
-    if (typeof cpu === 'number') {
-      t += tile('CPU', cpu + '%', 'Sampel 1 detik');
-    } else {
-      t += tile('CPU', loading ? '&#8230;' : '&#8212;', loading ? 'Memuat lewat ADB' : (live && live.status === 'error' ? 'Gagal memuat' : 'Tekan Segarkan'), true);
-    }
-    return '<div class="tiles">' + t + '</div>';
-  }
-
   function trafficHtml(dev) {
     if (!dev.rxtx_available) return '<div class="traffic"><div class="now"><span class="sub">Trafik tidak tersedia</span></div></div>';
     var rate = (state.samples[dev.ip] || {}).rate;
@@ -373,6 +329,7 @@
     var dev = selectedDev();
     if (!dev) {
       el.className = 'focus';
+      stopLive();
       el.innerHTML = '<div class="empty">' + (configured()
         ? (state.error ? 'Belum ada data.' : 'Belum ada target. Tekan + untuk menambah IP HP yang ingin dipantau.')
         : 'Isi URL router dan token di pengaturan untuk mulai memantau.') + '</div>';
@@ -398,39 +355,13 @@
       '<button type="button" class="btn-auto" data-act="auto" aria-pressed="' + (state.auto ? 'true' : 'false') + '">' +
       (state.auto ? 'Auto ' + sec + ' dtk' : 'Auto mati') + '</button></div>';
     if (conn) {
-      h += tilesHtml(dev) + trafficHtml(dev);
-      var live = state.live[dev.ip];
-      h += '<div class="panel"><label>Aplikasi aktif</label><div class="val">' +
-        foregroundHtml(Object.assign({}, dev, { detail: live && live.detail ? live.detail : undefined })) + '</div></div>';
+      h += '<div id="liveHost"></div>' + trafficHtml(dev);
     } else {
       h += '<div class="panel">' + metricsHtml(dev, true) + noteHtml(dev) + '</div>';
     }
     if (conn) h += toolsHtml(dev.ip);
     el.innerHTML = h;
-  }
-
-  /* RAM/CPU datang dari /status?detail=1 (±8 dtk via ADB): hanya untuk HP terpilih,
-     saat dipilih, saat pertama kali terhubung, dan saat tombol Segarkan ditekan. */
-  function liveNeeded(ip, mode) {
-    var dev = findDev(ip);
-    if (!dev || !dev.adb || dev.adb.status !== 'connected') return false;
-    var lv = state.live[ip];
-    if (lv && lv.status === 'loading') return false;
-    if (mode === 'force' || !lv) return true;
-    if (mode === 'select') return Date.now() - lv.at > 120000;
-    return false;
-  }
-
-  async function loadLive(ip) {
-    var prev = state.live[ip];
-    state.live[ip] = { status: 'loading', detail: prev ? prev.detail : null, at: Date.now() };
-    try {
-      var res = await api.detail(ip);
-      state.live[ip] = { status: 'ok', detail: res && res.detail ? res.detail : null, at: Date.now() };
-    } catch (e) {
-      state.live[ip] = { status: 'error', detail: state.live[ip].detail, err: L.errorMessage(e), at: Date.now() };
-    }
-    if (state.selectedIp === ip) renderFocus();
+    if (conn) mountLive(dev); else stopLive();
   }
 
   function selectDevice(ip) {
@@ -438,7 +369,6 @@
     state.selectedIp = ip;
     storeSet('sel', ip);
     state.enter = true;
-    if (liveNeeded(ip, 'select')) loadLive(ip); // set status loading secara sinkron sebelum render
     renderChips();
     renderFocus();
     var chip = document.querySelector('.chip.on');
@@ -452,11 +382,6 @@
     renderFocus(true);
     try {
       await refreshIp(ip, null);
-      if (findDev(ip) && liveNeeded(ip, 'force')) {
-        var p = loadLive(ip);
-        renderFocus(true);
-        await p;
-      }
     } finally {
       state.busyIp = null;
       renderFocus(true);
@@ -529,9 +454,6 @@
       // Resume yang datang saat request berjalan jangan sampai hilang.
       if (resumeQueued) { resumeQueued = false; resumeCycle(); }
     }
-    // Tandai "memuat" RAM/CPU sebelum render supaya hanya ada satu render (animasi masuk tidak terpotong).
-    var sd = selectedDev();
-    if (sd && liveNeeded(sd.ip, 'poll')) loadLive(sd.ip);
     renderAll();
   }
 
@@ -697,8 +619,6 @@
   /* ---------- screenshot & cek performa (tombol di layar utama, manual) ---------- */
 
   var ICON_SHOT = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>';
-  var ICON_LIVE = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>';
-  var ICON_PERF = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg>';
 
   function toolState(ip, kind) {
     var t = state.tools[ip];
@@ -706,14 +626,11 @@
   }
 
   function toolsHtml(ip) {
-    var sh = toolState(ip, 'shot'), op = toolState(ip, 'optim');
-    var shBusy = !!sh && sh.status === 'loading', opBusy = !!op && op.status === 'loading';
+    var sh = toolState(ip, 'shot');
+    var shBusy = !!sh && sh.status === 'loading';
     var h = '<div class="tools">' +
-      '<button type="button" class="btn-tool' + (shBusy ? ' busy' : '') + '" data-act="shot"' + (shBusy ? ' disabled' : '') + '>' + ICON_SHOT + 'Screenshot</button>' +
-      '<button type="button" class="btn-tool' + (opBusy ? ' busy' : '') + '" data-act="optim"' + (opBusy ? ' disabled' : '') + '>' + ICON_PERF + 'Cek performa</button>' +
-      '<button type="button" class="btn-tool btn-live" data-act="live">' + ICON_LIVE + 'Live · performa waktu nyata</button></div>';
+      '<button type="button" class="btn-tool' + (shBusy ? ' busy' : '') + '" data-act="shot"' + (shBusy ? ' disabled' : '') + '>' + ICON_SHOT + 'Screenshot</button></div>';
     if (sh) h += '<div class="panel result">' + shotResultHtml(sh) + '</div>';
-    if (op) h += '<div class="panel result">' + optimResultHtml(op) + '</div>';
     return h;
   }
 
@@ -727,33 +644,6 @@
     var res = t.res;
     return h + '<img class="shot-img" alt="Screenshot HP" src="data:image/png;base64,' + res.png_base64 + '">' +
       '<p class="sub" style="margin-top:8px">' + esc(L.formatBytes(res.bytes)) + ' · ' + esc(res.seconds) + ' dtk</p>';
-  }
-
-  function optimResultHtml(t) {
-    var h = '<label>Cek performa</label>';
-    if (t.status === 'loading') {
-      return h + '<div class="skeleton"></div><div class="skeleton" style="width:70%"></div>' +
-        '<p class="sub">Membaca RAM/CPU lewat ADB…</p>';
-    }
-    if (t.status === 'error') return h + '<p class="form-error">' + esc(t.err) + '</p>';
-    var res = t.res;
-    var ru = L.ramUsage(res.ram);
-    h += '<div class="metrics" style="margin-top:8px">';
-    h += metric('RAM terpakai', ru === null ? '—' :
-      (L.formatBytes(ru.usedKb * 1024) + ' / ' + L.formatBytes(ru.totalKb * 1024) + ' (' + ru.pct + '%)' +
-        bar(100 - ru.pct, ru.pct >= 85 ? 'low' : (ru.pct >= 70 ? 'mid' : 'cy'))), true);
-    var cpu = res.cpu_percent;
-    h += metric('CPU', cpu === null || cpu === undefined ? '—' :
-      (cpu + '%' + bar(100 - cpu, cpu >= 85 ? 'low' : (cpu >= 60 ? 'mid' : 'cy'))), true);
-    h += '</div>';
-    if (Array.isArray(res.top_apps) && res.top_apps.length) {
-      h += '<p class="sub" style="margin-top:10px">Proses pemakai RAM terbesar</p><div class="apps">';
-      res.top_apps.forEach(function (a) {
-        h += '<div>' + esc(L.formatBytes(Number(a.kb) * 1024)) + ' — ' + esc(a.label) + '</div>';
-      });
-      h += '</div>';
-    }
-    return h;
   }
 
   async function runTool(kind) {
@@ -782,9 +672,9 @@
   }
 
 
-  /* ---------- Mode Live: performa waktu nyata ---------- */
+  /* ---------- Live di dashboard: performa waktu nyata untuk HP terpilih ---------- */
 
-  var live = { ip: null, run: 0, st: null, n: 0, ok: false };
+  var live = { ip: null, run: 0, running: false, st: null, n: 0, node: null, slow: null, every: 2 };
 
   function gaugeHtml(k, name) {
     return '<div class="lv-g" data-g="' + k + '">' +
@@ -799,19 +689,23 @@
   }
 
   function liveDom() {
-    return '<div class="lv-sec"><label>CPU &amp; RAM</label><div class="lv-gauges">' +
+    return '<div class="lv-head"><label>Performa langsung</label><span class="live-status" data-st>Menghubungkan…</span>' +
+      '<select data-every aria-label="Interval sampel">' +
+      ['1', '2', '5'].map(function (v) { return '<option value="' + v + '"' + (Number(v) === live.every ? ' selected' : '') + '>' + v + ' dtk</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="lv-sec"><label>CPU &amp; RAM</label><div class="lv-gauges">' +
         gaugeHtml('cpu', 'CPU') + gaugeHtml('ram', 'RAM') + '</div></div>' +
       '<div class="lv-sec"><label>Baterai</label><div class="lv-gauges">' + gaugeHtml('bat', 'Baterai') +
         numHtml('cur', 'Arus (+ mengisi / − dipakai)', 'big') + '</div><div class="lv-rows" style="margin-top:10px">' +
-        numHtml('temp', 'Suhu') + numHtml('volt', 'Tegangan') + numHtml('chg', 'Status', 'wide') + '</div></div>' +
+        numHtml('temp', 'Suhu') + numHtml('volt', 'Tegangan') + numHtml('chg', 'Status') + numHtml('rem', 'Sisa waktu') + '</div></div>' +
       '<div class="lv-sec"><label>Jaringan</label><div class="lv-rows">' +
         numHtml('rx', '↓ Unduh') + numHtml('tx', '↑ Unggah') + numHtml('ping', 'Ping ke router') + numHtml('rssi', 'Sinyal WiFi') + '</div></div>' +
       '<div class="lv-sec"><label>Layar &amp; aplikasi aktif</label><div class="lv-rows">' +
         numHtml('screen', 'Layar') + numHtml('app', 'Aplikasi aktif', 'wide') + '</div></div>';
   }
 
-  function setGauge(k, pct, text, sub, level) {
-    var g = $('#lvBody [data-g="' + k + '"]');
+  function setGauge(k, pct, sub, level) {
+    var g = live.node && live.node.querySelector('[data-g="' + k + '"]');
     if (!g) return;
     var fill = g.querySelector('[data-fill]');
     var ok = typeof pct === 'number' && !isNaN(pct);
@@ -822,43 +716,42 @@
     g.querySelector('[data-s]').textContent = sub || ' ';
   }
   function setNum(k, text) {
-    var el = $('#lvBody [data-n="' + k + '"]');
+    var el = live.node && live.node.querySelector('[data-n="' + k + '"]');
     if (el && el.textContent !== text) el.textContent = text;
   }
+  function setLiveStatus(kind, text) {
+    var el = live.node && live.node.querySelector('[data-st]');
+    if (!el) return;
+    el.className = 'live-status' + (kind ? ' ' + kind : '');
+    el.textContent = text;
+  }
 
-  function renderLive(v, raw) {
+  function renderLive(v) {
     var b = v.battery || {};
-    setGauge('cpu', v.cpu, '', v.cpu === null ? 'menghitung…' : '', L.loadLevel(v.cpu));
-    if (v.ram) setGauge('ram', v.ram.pct, '', L.formatBytes(v.ram.usedKb * 1024) + ' / ' + L.formatBytes(v.ram.totalKb * 1024), L.loadLevel(v.ram.pct));
+    setGauge('cpu', v.cpu, v.cpu === null ? 'menghitung…' : '', L.loadLevel(v.cpu));
+    if (v.ram) setGauge('ram', v.ram.pct, L.formatBytes(v.ram.usedKb * 1024) + ' / ' + L.formatBytes(v.ram.totalKb * 1024), L.loadLevel(v.ram.pct));
     else setGauge('ram', null);
     var lvl = typeof b.level === 'number' ? b.level : null;
-    setGauge('bat', lvl, '', b.charging ? 'Mengisi' : 'Tidak mengisi', b.charging ? 'cyan' : (lvl !== null && lvl < 20 ? 'hot' : (lvl !== null && lvl < 50 ? 'warm' : '')));
+    setGauge('bat', lvl, b.charging ? 'Mengisi' : 'Tidak mengisi', b.charging ? 'cyan' : (lvl !== null && lvl < 20 ? 'hot' : (lvl !== null && lvl < 50 ? 'warm' : '')));
     setNum('cur', v.current ? L.formatCurrent(v.current.ma) : '—');
     setNum('temp', L.formatTemp(b.temp_c));
     setNum('volt', L.formatVoltage(b.voltage_mv));
-    setNum('chg', b.charging === true ? 'Mengisi' + (L.chargeSourceText(b.source) ? ' · ' + L.chargeSourceText(b.source) : '') : (b.charging === false ? 'Dipakai' : '—'));
+    setNum('chg', b.charging === true ? 'Mengisi' : (b.charging === false ? 'Dipakai' : '—'));
+    var dev = findDev(live.ip), drain = dev && dev.adb ? dev.adb.avg_drain_pct_per_hour : null;
+    var rem = b.charging === false && lvl !== null ? L.estimateRemaining(lvl, drain) : null;
+    setNum('rem', b.charging === true ? 'Mengisi' : (rem || '—'));
     setNum('rx', L.formatRate(v.rx));
     setNum('tx', L.formatRate(v.tx));
     setNum('ping', v.ping === null ? '—' : Math.round(v.ping * 10) / 10 + ' ms');
-    var sl = v.slow;
-    if (sl) {
-      // bagian lambat hanya datang tiap beberapa sampel: tampilkan nilai terakhir di antaranya
-      live.slow = sl;
-    }
-    sl = live.slow;
+    // bagian lambat hanya datang tiap beberapa sampel: tampilkan nilai terakhir di antaranya
+    if (v.slow) live.slow = v.slow;
+    var sl = live.slow;
     if (sl) {
       setNum('rssi', typeof sl.rssi === 'number' ? sl.rssi + ' dBm' : '—');
-      var sc = sl.screen === 'Awake' ? 'Menyala' : (sl.screen === 'Asleep' ? 'Tidur' : (sl.screen === 'Dozing' ? 'Doze' : (sl.screen || '—')));
-      setNum('screen', sc);
+      setNum('screen', sl.screen === 'Awake' ? 'Menyala' : (sl.screen === 'Asleep' ? 'Tidur' : (sl.screen === 'Dozing' ? 'Doze' : (sl.screen || '—'))));
       var fg = sl.foreground || {};
       setNum('app', fg.label || fg.package || '—');
     }
-  }
-
-  function setLiveStatus(kind, text) {
-    var el = $('#lvStatus');
-    el.className = 'live-status' + (kind ? ' ' + kind : '');
-    el.textContent = text;
   }
 
   function sleepMs(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -867,48 +760,54 @@
     var fails = 0;
     while (live.run === run) {
       if (document.hidden) { await sleepMs(500); continue; }
-      var t0 = Date.now();
-      var every = Number($('#lvEvery').value) || 2;
-      var skipWait = false;
+      var t0 = Date.now(), skipWait = false;
       try {
         var res = await api.live(live.ip, live.n % 5 === 0);
         if (live.run !== run) return;
         if (!res || res.ok !== true) throw new L.ApiError('http', 'respons tidak valid', 0, 'invalid');
         live.n++; fails = 0;
-        renderLive(L.liveStep(live.st, res), res);
+        renderLive(L.liveStep(live.st, res));
         setLiveStatus('ok', 'Live');
       } catch (e) {
         if (live.run !== run) return;
         if (e && e.code === 'busy') { skipWait = true; }
         else {
           fails++;
+          if (e && (e.kind === 'auth' || e.code === 'adb_not_connected' || e.code === 'not_found')) {
+            setLiveStatus('err', L.errorMessage(e)); live.running = false; return;
+          }
           setLiveStatus('err', fails > 1 ? 'Terputus · ' + L.errorMessage(e) : 'Mencoba lagi…');
-          if (e && (e.kind === 'auth' || e.code === 'adb_not_connected' || e.code === 'not_found')) { setLiveStatus('err', L.errorMessage(e)); return; }
         }
       }
-      var wait = skipWait ? 400 : Math.max(0, Math.max(every, fails ? Math.min(2 + fails, 6) : every) * 1000 - (Date.now() - t0));
-      await sleepMs(wait);
+      var period = Math.max(live.every, fails ? Math.min(2 + fails, 6) : 0) * 1000;
+      await sleepMs(skipWait ? 400 : Math.max(0, period - (Date.now() - t0)));
     }
   }
 
-  function openLive() {
-    var ip = state.selectedIp;
-    var dev = ip && findDev(ip);
-    if (!dev || !dev.adb || dev.adb.status !== 'connected') return;
-    live.ip = ip; live.st = L.createLiveState(); live.n = 0; live.slow = null;
-    $('#lvTitle').textContent = 'Live · ' + L.displayName(dev);
-    $('#lvSub').textContent = ip;
-    $('#lvBody').innerHTML = liveDom();
-    setLiveStatus('', 'Menghubungkan…');
-    openLayer('layerLive');
-    liveLoop(++live.run);
+  function stopLive() {
+    live.run++; live.running = false; live.ip = null; live.node = null;
   }
-  function stopLive() { live.run++; live.ip = null; }
 
-  document.addEventListener('visibilitychange', function () {
-    // loop menunggu sendiri saat tersembunyi; ulang pembaruan cepat saat kembali
-    if (!document.hidden && live.ip) setLiveStatus('', 'Melanjutkan…');
-  });
+  /* Dipanggil tiap renderFocus: panel Live dibuat sekali per HP lalu dipindahkan ke tempatnya
+     (innerHTML dirender ulang saat polling, tapi gauge tidak ikut hilang/berkedip). */
+  function mountLive(dev) {
+    var host = $('#liveHost');
+    if (!host || !configured()) return;
+    if (live.ip !== dev.ip || !live.node) {
+      stopLive();
+      live.ip = dev.ip; live.st = L.createLiveState(); live.n = 0; live.slow = null;
+      var node = document.createElement('section');
+      node.className = 'panel live-panel';
+      node.innerHTML = liveDom();
+      node.querySelector('[data-every]').addEventListener('change', function (e) {
+        live.every = Number(e.target.value) || 2;
+        storeSet('liveEvery', String(live.every));
+      });
+      live.node = node;
+    }
+    host.appendChild(live.node);
+    if (!live.running) { live.running = true; liveLoop(++live.run); }
+  }
 
   // Tahan lama pada chip HP membuka lembar detail (detail lengkap, daftar aplikasi, hapus target).
   var pressTimer = null, pressFired = false;
@@ -959,8 +858,6 @@
     if (act === 'refresh') focusRefresh();
     else if (act === 'auto') toggleAuto();
     else if (act === 'shot') runTool('shot');
-    else if (act === 'optim') runTool('optim');
-    else if (act === 'live') openLive();
   });
 
   $('#chips').addEventListener('click', function (e) {
@@ -1089,13 +986,14 @@
   /* ---------- mulai ---------- */
 
   async function init() {
-    var v = await Promise.all([storeGet('url1'), storeGet('url2'), storeGet('token'), storeGet('interval'), storeGet('url3'), storeGet('cfkey'), storeGet('sel'), storeGet('auto')]);
+    var v = await Promise.all([storeGet('url1'), storeGet('url2'), storeGet('token'), storeGet('interval'), storeGet('url3'), storeGet('cfkey'), storeGet('sel'), storeGet('auto'), storeGet('liveEvery')]);
     state.settings = {
       url1: v[0] || '', url2: v[1] || '', url3: v[4] || '', token: v[2] || '', cfkey: v[5] || '',
       interval: [10, 15, 30, 60].indexOf(Number(v[3])) !== -1 ? Number(v[3]) : 30
     };
     state.selectedIp = v[6] || null;
     state.auto = v[7] !== '0';
+    live.every = [1, 2, 5].indexOf(Number(v[8])) !== -1 ? Number(v[8]) : 2;
     $('#verLabel').textContent = 'v' + (window.APP_VERSION || 'dev');
     renderAll();
     if (configured()) {
