@@ -349,7 +349,7 @@
     var conn = dev.adb && dev.adb.status === 'connected';
     var busy = state.busyIp === dev.ip;
     var sec = Number(state.settings.interval) || 30;
-    var h = heroHtml(dev);
+    var h = heroHtml(liveDev(dev));
     h += '<div class="actions"><button type="button" class="btn-refresh' + (busy ? ' busy' : '') + '" data-act="refresh"' + (busy ? ' disabled' : '') + '>' +
       ICON_REFRESH + 'Segarkan HP ini</button>' +
       '<button type="button" class="btn-auto" data-act="auto" aria-pressed="' + (state.auto ? 'true' : 'false') + '">' +
@@ -695,9 +695,8 @@
       '</select></div>' +
       '<div class="lv-sec"><label>CPU &amp; RAM</label><div class="lv-gauges">' +
         gaugeHtml('cpu', 'CPU') + gaugeHtml('ram', 'RAM') + '</div></div>' +
-      '<div class="lv-sec"><label>Baterai</label><div class="lv-gauges">' + gaugeHtml('bat', 'Baterai') +
-        numHtml('cur', 'Arus (+ mengisi / − dipakai)', 'big') + '</div><div class="lv-rows" style="margin-top:10px">' +
-        numHtml('temp', 'Suhu') + numHtml('volt', 'Tegangan') + numHtml('chg', 'Status') + numHtml('rem', 'Sisa waktu') + '</div></div>' +
+      '<div class="lv-sec"><label>Baterai</label><div class="lv-rows">' +
+        numHtml('cur', 'Arus (+isi / −pakai)') + numHtml('temp', 'Suhu') + numHtml('volt', 'Tegangan') + numHtml('rem', 'Sisa waktu') + '</div></div>' +
       '<div class="lv-sec"><label>Jaringan</label><div class="lv-rows">' +
         numHtml('rx', '↓ Unduh') + numHtml('tx', '↑ Unggah') + numHtml('ping', 'Ping ke router') + numHtml('rssi', 'Sinyal WiFi') + '</div></div>' +
       '<div class="lv-sec"><label>Layar &amp; aplikasi aktif</label><div class="lv-rows">' +
@@ -732,11 +731,9 @@
     if (v.ram) setGauge('ram', v.ram.pct, L.formatBytes(v.ram.usedKb * 1024) + ' / ' + L.formatBytes(v.ram.totalKb * 1024), L.loadLevel(v.ram.pct));
     else setGauge('ram', null);
     var lvl = typeof b.level === 'number' ? b.level : null;
-    setGauge('bat', lvl, b.charging ? 'Mengisi' : 'Tidak mengisi', b.charging ? 'cyan' : (lvl !== null && lvl < 20 ? 'hot' : (lvl !== null && lvl < 50 ? 'warm' : '')));
     setNum('cur', v.current ? L.formatCurrent(v.current.ma) : '—');
     setNum('temp', L.formatTemp(b.temp_c));
     setNum('volt', L.formatVoltage(b.voltage_mv));
-    setNum('chg', b.charging === true ? 'Mengisi' : (b.charging === false ? 'Dipakai' : '—'));
     var dev = findDev(live.ip), drain = dev && dev.adb ? dev.adb.avg_drain_pct_per_hour : null;
     var rem = b.charging === false && lvl !== null ? L.estimateRemaining(lvl, drain) : null;
     setNum('rem', b.charging === true ? 'Mengisi' : (rem || '—'));
@@ -745,6 +742,7 @@
     setNum('ping', v.ping === null ? '—' : Math.round(v.ping * 10) / 10 + ' ms');
     // bagian lambat hanya datang tiap beberapa sampel: tampilkan nilai terakhir di antaranya
     if (v.slow) live.slow = v.slow;
+    live.bat = { level: lvl, charging: b.charging, source: b.source, at: Date.now() };
     var sl = live.slow;
     if (sl) {
       setNum('rssi', typeof sl.rssi === 'number' ? sl.rssi + ' dBm' : '—');
@@ -752,6 +750,36 @@
       var fg = sl.foreground || {};
       setNum('app', fg.label || fg.package || '—');
     }
+    refreshHero(v);
+  }
+
+  /* Kartu HP di atas (cincin baterai, status mengisi, layar, WiFi) memakai sampel Live terbaru
+     alih-alih data router yang berumur hingga satu siklus polling. */
+  function liveDev(dev) {
+    if (!dev || live.ip !== dev.ip || !live.bat || Date.now() - live.bat.at > 15000) return dev;
+    var a = Object.assign({}, dev.adb), r = Object.assign({}, dev.router), b = live.bat, sl = live.slow;
+    if (typeof b.level === 'number') a.battery = b.level;
+    if (typeof b.charging === 'boolean') { a.charging = b.charging; a.charge_source = b.charging ? (b.source || a.charge_source) : null; }
+    if (sl) {
+      if (sl.screen) a.screen = sl.screen;
+      if (typeof sl.rssi === 'number') a.wifi_rssi = sl.rssi;
+      if (sl.ssid) a.wifi_ssid = sl.ssid;
+    }
+    if (typeof live.ping === 'number') r.latency = String(live.ping);
+    return Object.assign({}, dev, { adb: a, router: r });
+  }
+
+  var heroSig = '';
+  function refreshHero(v) {
+    live.ping = v && typeof v.ping === 'number' ? v.ping : live.ping;
+    var dev = findDev(live.ip), hc = $('#focus .hero-card');
+    if (!dev || !hc || state.enterUntil > Date.now()) return;
+    var html = heroHtml(liveDev(dev));
+    if (html === heroSig) return;
+    heroSig = html;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    if (tmp.firstChild) hc.replaceWith(tmp.firstChild);
   }
 
   function sleepMs(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -785,7 +813,7 @@
   }
 
   function stopLive() {
-    live.run++; live.running = false; live.ip = null; live.node = null;
+    live.run++; live.running = false; live.ip = null; live.node = null; live.bat = null; live.ping = null; heroSig = '';
   }
 
   /* Dipanggil tiap renderFocus: panel Live dibuat sekali per HP lalu dipindahkan ke tempatnya

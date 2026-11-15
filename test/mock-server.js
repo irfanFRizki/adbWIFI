@@ -109,7 +109,7 @@ function start(port) {
           ram: { total_kb: 3826256, available_kb: 1501140 },
           net: { rx: n * 200000, tx: n * 20000 },
           ping_ms: 3.4,
-          battery: { level: 57, status: 2, charging: true, source: 'ac', temp_c: 30.1, voltage_mv: 4012, charge_counter_uah: 2500000, max_charging_ua: 500000 },
+          battery: { level: state.liveLevel || 57, status: 2, charging: true, source: 'ac', temp_c: 30.1, voltage_mv: 4012, charge_counter_uah: 2500000, max_charging_ua: 500000 },
           current: { ma: state.liveSysfs === undefined ? -450 : state.liveSysfs, source: 'sysfs', cache_ma: null, cache_source: null },
           slow: url.searchParams.get('full') === '1'
             ? { screen: 'Awake', rssi: -57, ssid: 'RumahNet', foreground: { package: 'com.whatsapp', label: 'WhatsApp' } } : null

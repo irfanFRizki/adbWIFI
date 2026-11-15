@@ -5,7 +5,8 @@
 - **Performa langsung di dashboard**: HP terpilih yang terhubung ADB otomatis menampilkan panel
   gauge dan angka (CPU, RAM, baterai: level/arus/suhu/tegangan/status/sisa waktu, jaringan:
   unduh/unggah/ping/sinyal WiFi, layar dan aplikasi aktif) yang diperbarui tiap 2 dtk (pilihan
-  1/2/5 dtk, diingat). Tanpa tombol; polling berhenti saat aplikasi ke latar atau HP berganti
+  1/2/5 dtk, diingat). Kartu HP di atas (cincin baterai, status mengisi, layar, WiFi, latensi)
+  ikut diperbarui langsung dari sampel Live, jadi tidak ada gauge baterai kedua di panel. Tanpa tombol; polling berhenti saat aplikasi ke latar atau HP berganti
   ke yang tidak terhubung. Tombol "Cek performa" dan petak RAM/CPU lama dihapus; di bawahnya
   tinggal tombol Screenshot.
 - Router: endpoint baru `GET /live?ip=` (satu panggilan ADB ringan, counter mentah, kunci
