@@ -267,6 +267,16 @@
     return pct >= 85 ? 'hot' : (pct >= 60 ? 'warm' : 'ok');
   }
 
+  /* ms -> "2j 15m" / "15m" / "<1m"; null/0 -> null (biar pemanggil tampilkan "—"). */
+  function formatDuration(ms) {
+    if (typeof ms !== 'number' || isNaN(ms) || ms < 0) return null;
+    var m = Math.round(ms / 60000);
+    if (m < 1) return '<1m';
+    var h = Math.floor(m / 60);
+    m = m % 60;
+    return h > 0 ? (h + 'j ' + m + 'm') : (m + 'm');
+  }
+
   /* ---------- klien API ---------- */
 
   function ApiError(kind, message, status, code) {
@@ -293,7 +303,15 @@
     empty_capture: 'Tangkapan layar kosong. Coba lagi.',
     encode_failed: 'Gagal memproses hasil tangkapan layar di router.',
     adb_timeout: 'HP tidak merespons tepat waktu (ADB lambat atau layar HP tidur dalam).',
-    busy: 'Sampel sebelumnya masih berjalan.'
+    busy: 'Sampel sebelumnya masih berjalan.',
+    helper_not_installed: 'Aplikasi pendamping belum terpasang di HP ini.',
+    location_timeout: 'HP tidak kunjung memberi lokasi (GPS/jaringan lokasi mungkin mati).',
+    location_permission_denied: 'Izin lokasi belum diberikan ke aplikasi pendamping di HP ini.',
+    location_disabled: 'GPS dan lokasi jaringan mati di HP ini.',
+    location_unknown: 'Gagal membaca lokasi dari HP ini.',
+    usage_timeout: 'HP tidak kunjung membalas permintaan data pemakaian.',
+    usage_access_denied: 'Izin akses riwayat pemakaian belum diberikan ke aplikasi pendamping di HP ini.',
+    usage_unknown: 'Gagal membaca data pemakaian dari HP ini.'
   };
 
   function errorMessage(err) {
@@ -403,6 +421,16 @@
         return request('GET', '/live?ip=' + encodeURIComponent(ip) + (full ? '&full=1' : ''), undefined, 9000)
           .then(function (r) { return r.data; });
       },
+      /* Satu titik lokasi on-demand (budget router ~20 dtk: menunggu fix GPS/jaringan). */
+      location: function (ip) {
+        return request('GET', '/location?ip=' + encodeURIComponent(ip), undefined, 25000)
+          .then(function (r) { return r.data; });
+      },
+      /* Ringkasan pemakaian hari ini (cepat: query lokal di HP). */
+      usage: function (ip) {
+        return request('GET', '/usage?ip=' + encodeURIComponent(ip), undefined, 12000)
+          .then(function (r) { return r.data; });
+      },
       targets: function () {
         return request('GET', '/targets', undefined, 15000).then(function (r) { return r.data; });
       },
@@ -460,6 +488,7 @@
     createLiveState: createLiveState,
     liveStep: liveStep,
     loadLevel: loadLevel,
+    formatDuration: formatDuration,
     ApiError: ApiError,
     errorMessage: errorMessage,
     createApi: createApi,

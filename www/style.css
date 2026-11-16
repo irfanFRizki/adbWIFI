@@ -320,3 +320,14 @@ button:active:not(:disabled) { transform: scale(.94); }
 .lv-n.big { display: flex; flex-direction: column; justify-content: center; text-align: center; }
 .lv-n.big b { font-size: 24px; }
 @media (prefers-reduced-motion: reduce) { .lv-g .ring-fill, .live-status.ok::before { transition: none; animation: none; } }
+
+/* ---------- Lokasi & pemakaian hari ini (panel .tools) ---------- */
+.tools .btn-tool:nth-child(3):last-child { grid-column: 1 / -1; }
+.panel.result .strong { font-weight: 600; font-size: 14px; }
+.panel.result a.btn-tool { text-decoration: none; }
+.usage-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.usage-row { display: grid; grid-template-columns: 1fr 2fr auto; align-items: center; gap: 8px; font-size: 13px; }
+.usage-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-bar { height: 7px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.usage-bar i { display: block; height: 100%; background: var(--primary); border-radius: 4px; }
+.usage-ms { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }

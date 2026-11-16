@@ -93,6 +93,39 @@ function start(port) {
           top_apps: [{ kb: 58315, label: 'com.google.android.gms (pid 1234)' }, { kb: 45331, label: 'system (pid 567)' }]
         });
       }
+      if (route === '/location' && req.method === 'GET') {
+        const ip = url.searchParams.get('ip');
+        const t = state.targets.find((x) => x.ip === ip);
+        if (!t) return send(404, { error: 'not_found', ip });
+        const d = deviceFor(t, now, state);
+        if (d.adb.status !== 'connected') return send(409, { error: 'adb_not_connected' });
+        if (state.helperMissing) return send(409, { error: 'helper_not_installed' });
+        if (state.locationError) return send(state.locationStatus || 403, { error: state.locationError });
+        return send(200, {
+          ok: true, ip, ts: Date.now(),
+          lat: state.locationLat != null ? state.locationLat : -6.2,
+          lon: state.locationLon != null ? state.locationLon : 106.816666,
+          acc_m: 12.5, provider: 'gps', age_s: 0,
+          address: state.locationNoAddr ? null : 'Jalan Contoh, Jakarta Pusat, DKI Jakarta, Indonesia'
+        });
+      }
+      if (route === '/usage' && req.method === 'GET') {
+        const ip = url.searchParams.get('ip');
+        const t = state.targets.find((x) => x.ip === ip);
+        if (!t) return send(404, { error: 'not_found', ip });
+        const d = deviceFor(t, now, state);
+        if (d.adb.status !== 'connected') return send(409, { error: 'adb_not_connected' });
+        if (state.helperMissing) return send(409, { error: 'helper_not_installed' });
+        if (state.usageError) return send(403, { error: state.usageError });
+        return send(200, {
+          ok: true, ip, ts: Date.now(), date: '2026-11-16',
+          screen_on_ms: state.screenOnMs !== undefined ? state.screenOnMs : 5412000,
+          apps: state.usageApps || [
+            { pkg: 'com.whatsapp', label: 'WhatsApp', ms: 1800000 },
+            { pkg: 'com.roblox.client', label: 'Roblox', ms: 1200000 }
+          ]
+        });
+      }
       if (route === '/live' && req.method === 'GET') {
         const ip = url.searchParams.get('ip');
         const t = state.targets.find((x) => x.ip === ip);

@@ -619,19 +619,70 @@
   /* ---------- screenshot & cek performa (tombol di layar utama, manual) ---------- */
 
   var ICON_SHOT = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>';
+  var ICON_LOC = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/></svg>';
+  var ICON_USAGE = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>';
 
   function toolState(ip, kind) {
     var t = state.tools[ip];
     return t && t[kind] ? t[kind] : null;
   }
 
+  function toolBtn(act, icon, label, t) {
+    var busy = !!t && t.status === 'loading';
+    return '<button type="button" class="btn-tool' + (busy ? ' busy' : '') + '" data-act="' + act + '"' + (busy ? ' disabled' : '') + '>' + icon + label + '</button>';
+  }
+
   function toolsHtml(ip) {
-    var sh = toolState(ip, 'shot');
-    var shBusy = !!sh && sh.status === 'loading';
+    var sh = toolState(ip, 'shot'), loc = toolState(ip, 'loc'), us = toolState(ip, 'usage');
     var h = '<div class="tools">' +
-      '<button type="button" class="btn-tool' + (shBusy ? ' busy' : '') + '" data-act="shot"' + (shBusy ? ' disabled' : '') + '>' + ICON_SHOT + 'Screenshot</button></div>';
+      toolBtn('shot', ICON_SHOT, 'Screenshot', sh) +
+      toolBtn('loc', ICON_LOC, 'Lokasi', loc) +
+      toolBtn('usage', ICON_USAGE, 'Pemakaian hari ini', us) + '</div>';
     if (sh) h += '<div class="panel result">' + shotResultHtml(sh) + '</div>';
+    if (loc) h += '<div class="panel result">' + locResultHtml(loc) + '</div>';
+    if (us) h += '<div class="panel result">' + usageResultHtml(us) + '</div>';
     return h;
+  }
+
+  function locResultHtml(t) {
+    var h = '<label>Lokasi</label>';
+    if (t.status === 'loading') {
+      return h + '<div class="skeleton"></div><div class="skeleton" style="width:60%"></div>' +
+        '<p class="sub">Menunggu HP mengambil titik lokasi (GPS/jaringan), bisa sampai ±20 dtk…</p>';
+    }
+    if (t.status === 'error') return h + '<p class="form-error">' + esc(t.err) + '</p>';
+    var r = t.res;
+    var geo = 'geo:' + r.lat + ',' + r.lon + '?q=' + r.lat + ',' + r.lon + '(HP)';
+    var prov = { gps: 'GPS', network: 'Jaringan', last_known: 'Terakhir diketahui' }[r.provider] || r.provider;
+    return h +
+      '<p class="strong">' + esc(r.address || (r.lat.toFixed(5) + ', ' + r.lon.toFixed(5))) + '</p>' +
+      (r.address ? '<p class="mono sub">' + r.lat.toFixed(5) + ', ' + r.lon.toFixed(5) + '</p>' : '') +
+      '<p class="sub">' + esc(prov) + (typeof r.acc_m === 'number' ? ' · akurasi ±' + Math.round(r.acc_m) + ' m' : '') +
+        (r.age_s > 5 ? ' · ' + Math.round(r.age_s / 60) + ' menit lalu' : ' · baru saja') + '</p>' +
+      '<a class="btn-tool" style="margin-top:8px;display:inline-flex" href="' + geo + '">' + ICON_LOC + 'Buka di peta</a>';
+  }
+
+  function usageResultHtml(t) {
+    var h = '<label>Pemakaian hari ini</label>';
+    if (t.status === 'loading') {
+      return h + '<div class="skeleton"></div><div class="skeleton" style="width:60%"></div>' +
+        '<p class="sub">Membaca riwayat pemakaian dari HP…</p>';
+    }
+    if (t.status === 'error') return h + '<p class="form-error">' + esc(t.err) + '</p>';
+    var r = t.res;
+    var screen = L.formatDuration(r.screen_on_ms);
+    var out = h + '<p class="strong">Layar menyala ' + (screen || '—') +
+      (r.screen_on_ms === null ? ' <span class="sub">(tidak didukung Android ini)</span>' : '') + '</p>';
+    if (!r.apps || !r.apps.length) return out + '<p class="sub">Belum ada aplikasi tercatat hari ini.</p>';
+    var max = r.apps[0].ms || 1;
+    out += '<div class="usage-list">';
+    r.apps.forEach(function (a) {
+      var pct = Math.max(4, Math.round((a.ms / max) * 100));
+      out += '<div class="usage-row"><span class="usage-label">' + esc(a.label || a.pkg) + '</span>' +
+        '<div class="usage-bar"><i style="width:' + pct + '%"></i></div>' +
+        '<span class="usage-ms">' + esc(L.formatDuration(a.ms) || '<1m') + '</span></div>';
+    });
+    return out + '</div>';
   }
 
   function shotResultHtml(t) {
@@ -658,10 +709,10 @@
     renderFocus(true);
     var result;
     try {
-      var res = kind === 'shot' ? await api.screenshot(ip) : await api.optimize(ip);
+      var res = kind === 'shot' ? await api.screenshot(ip) : (kind === 'loc' ? await api.location(ip) : (kind === 'usage' ? await api.usage(ip) : await api.optimize(ip)));
       var ok = kind === 'shot' ? (res && res.ok && res.png_base64) : (res && res.ok);
-      result = ok ? { status: 'ok', res: res, seq: seq }
-        : { status: 'error', err: kind === 'shot' ? 'Gagal mengambil screenshot.' : 'Gagal mengambil data performa.', seq: seq };
+      var errMsg = { shot: 'Gagal mengambil screenshot.', loc: 'Gagal mengambil lokasi.', usage: 'Gagal mengambil data pemakaian.', optim: 'Gagal mengambil data performa.' }[kind];
+      result = ok ? { status: 'ok', res: res, seq: seq } : { status: 'error', err: errMsg, seq: seq };
     } catch (e) {
       result = { status: 'error', err: L.errorMessage(e), seq: seq };
     }
@@ -886,6 +937,8 @@
     if (act === 'refresh') focusRefresh();
     else if (act === 'auto') toggleAuto();
     else if (act === 'shot') runTool('shot');
+    else if (act === 'loc') runTool('loc');
+    else if (act === 'usage') runTool('usage');
   });
 
   $('#chips').addEventListener('click', function (e) {

@@ -272,3 +272,46 @@ test('loadLevel dan api.live ke mock server', async () => {
     await assert.rejects(api.live('1.2.3.4'), (e) => e.code === 'not_found');
   } finally { server.close(); }
 });
+
+test('formatDuration', () => {
+  assert.equal(L.formatDuration(5412000), '1j 30m');
+  assert.equal(L.formatDuration(45000), '1m');
+  assert.equal(L.formatDuration(0), '<1m');
+  assert.equal(L.formatDuration(null), null);
+  assert.equal(L.formatDuration(-5), null);
+});
+
+test('api.location dan api.usage ke mock server', async () => {
+  const { server, port, state } = await mock.start(0);
+  const base = 'http://127.0.0.1:' + port;
+  try {
+    const api = L.createApi({ getSettings: () => ({ urls: [base], token: mock.TOKEN }), transport: L.fetchTransport });
+    const loc = await api.location('192.168.7.177');
+    assert.equal(loc.ok, true);
+    assert.equal(loc.provider, 'gps');
+    assert.ok(/Jakarta/.test(loc.address));
+
+    const us = await api.usage('192.168.7.177');
+    assert.equal(us.ok, true);
+    assert.equal(us.apps[0].label, 'WhatsApp');
+    assert.equal(L.formatDuration(us.screen_on_ms), '1j 30m');
+
+    state.helperMissing = true;
+    await assert.rejects(api.location('192.168.7.177'), (e) => e.code === 'helper_not_installed');
+    await assert.rejects(api.usage('192.168.7.177'), (e) => e.code === 'helper_not_installed');
+    state.helperMissing = false;
+
+    state.locationError = 'location_permission_denied'; state.locationStatus = 403;
+    await assert.rejects(api.location('192.168.7.177'), (e) => e.code === 'location_permission_denied' && /Izin lokasi/.test(L.errorMessage(e)));
+    state.locationError = null;
+
+    state.usageError = 'usage_access_denied';
+    await assert.rejects(api.usage('192.168.7.177'), (e) => e.code === 'usage_access_denied' && /riwayat pemakaian/.test(L.errorMessage(e)));
+
+    state.locationNoAddr = true;
+    const loc2 = await api.location('192.168.7.177');
+    assert.equal(loc2.address, null);
+
+    await assert.rejects(api.location('1.2.3.4'), (e) => e.code === 'not_found');
+  } finally { server.close(); }
+});
