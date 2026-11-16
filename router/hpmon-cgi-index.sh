@@ -6,6 +6,9 @@
 # GET  /status?ip=<ip>&detail=1 -> single device full detail
 # GET  /screenshot?ip=<ip> -> {ok,png_base64,bytes,seconds} tangkapan layar HP (lambat; lihat SCREENSHOT_T)
 # GET  /optimize?ip=<ip>  -> {ok,ram,cpu_percent,top_apps[]} ringkasan performa untuk fitur "Optimasi"
+# GET  /live?ip=<ip>[&full=1] -> satu sampel ringan (counter mentah CPU/jaringan, RAM, baterai, arus, ping) untuk mode Live; 429 busy bila sampel sebelumnya belum selesai
+# GET  /location?ip=<ip> -> {ok,lat,lon,acc_m,provider,age_s,address} satu titik lokasi on-demand lewat helper app (lihat helper-app/README.md)
+# GET  /usage?ip=<ip>    -> {ok,date,screen_on_ms,apps[]} ringkasan pemakaian hari ini lewat helper app
 # GET  /targets           -> targets list
 # POST /targets/add       -> add target
 # POST /targets/delete    -> delete target
@@ -13,6 +16,46 @@
 TOKEN_FILE="/etc/hpmon/token"
 CACHE_FILE="/tmp/hpmon_cache.json"
 TARGETS_FILE="/etc/hpmon/targets.json"
+CURRENT_UNIT_CONF="/etc/hpmon/current-unit.conf"
+HELPER_PKG="com.irfanfrizki.adbwifihelper"
+
+# Path file hasil tiap fitur helper, di getExternalFilesDir() milik helper app (bisa dibaca
+# lewat `adb shell cat` biasa, tanpa run-as -- lihat helper-app/README.md).
+HELPER_DIR="/sdcard/Android/data/$HELPER_PKG/files"
+
+# Helper app belum tentu terpasang (fitur ini opsional, per HP). Cek lebih dulu supaya route
+# yang butuh helper bisa gagal cepat dengan pesan jelas, bukan menunggu penuh lalu timeout.
+helper_installed() {
+  local addr="$1" out
+  out=$(adb_t "$addr" "pm path $HELPER_PKG")
+  [ -n "$out" ]
+}
+
+# Reverse-geocode lat/lon -> nama tempat, lewat Nominatim (OpenStreetMap). Best-effort murni:
+# kalau router tidak punya wget, tidak ada internet, atau Nominatim lambat/menolak, kembalikan
+# string kosong -- klien tetap menampilkan koordinat + tautan peta tanpa alamat. Di-cache per
+# IP selama 10 menit (field ini jarang dipakai lebih sering dari itu di mode on-demand).
+geocode_cached() {
+  local ip="$1" lat="$2" lon="$3"
+  local cache="/tmp/hpmon_geo_${ip}.json" now addr
+  now=$(date +%s)
+  if [ -f "$cache" ]; then
+    local cts clat clon caddr age
+    cts=$(jq -r '.ts // 0' "$cache" 2>/dev/null)
+    age=$((now - ${cts:-0}))
+    if [ "$age" -ge 0 ] && [ "$age" -lt 600 ]; then
+      jq -r '.address // empty' "$cache" 2>/dev/null
+      return 0
+    fi
+  fi
+  command -v wget >/dev/null 2>&1 || { echo ''; return 0; }
+  addr=$(wget -q -T 5 -O - --header='User-Agent: adbWIFI-hpmon/1.0 (self-hosted family monitor)' \
+    "https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=jsonv2&zoom=16" 2>/dev/null \
+    | jq -r '.display_name // empty' 2>/dev/null)
+  jq -n -c --arg ts "$now" --arg a "$addr" '{ts: ($ts|tonumber), address: ($a // "")}' > "$cache" 2>/dev/null
+  printf '%s' "$addr"
+}
+
 METHOD="${REQUEST_METHOD:-GET}"
 PATH_INFO="${PATH_INFO:-/}"
 PATH_INFO=$(printf '%s' "$PATH_INFO" | sed 's|^/hpmon||; s|^/||')
@@ -68,6 +111,23 @@ adb_bin() {
     sleep 1; waited=$((waited + 1))
   done
   wait "$apid" 2>/dev/null
+}
+
+# Satu panggilan ADB dengan batas waktu detik-an (adb_t() granularitasnya 1 dtk dan
+# sleep-nya menambah latensi). Dipakai /live yang dipanggil tiap ~2 dtk.
+# adb_live <addr> <budget_detik> <perintah_shell>
+adb_live() {
+  local addr="$1" budget="$2" cmd="$3"
+  local outfile="/tmp/hpmon_live_out_$$"
+  local apid kpid
+  adb -s "$addr" shell "$cmd" >"$outfile" 2>/dev/null &
+  apid=$!
+  ( sleep "$budget"; kill "$apid" 2>/dev/null ) >/dev/null 2>&1 &
+  kpid=$!
+  wait "$apid" 2>/dev/null
+  kill "$kpid" 2>/dev/null
+  tr -d '\r' < "$outfile" 2>/dev/null
+  rm -f "$outfile"
 }
 
 url_decode() { printf '%s' "$1" | sed 's/+/ /g; s/%20/ /g'; }
@@ -268,6 +328,221 @@ else
           '{ok:true, ram:{total_kb:($ram_total|tonumber), available_kb:($ram_avail|tonumber)},
             cpu_percent:(if $cpu_pct=="null" then null else ($cpu_pct|tonumber) end),
             top_apps:$top_apps}')
+      fi
+      ;;
+    /live)
+      # Satu sampel ringan untuk mode Live di aplikasi (dipanggil tiap ~2 dtk). Tanpa state:
+      # yang dikembalikan counter mentah (CPU, jaringan, uptime HP) dan klien yang menghitung
+      # selisihnya. ?full=1 menambah bagian lambat (layar, WiFi, aplikasi aktif).
+      IP=$(qs_get ip)
+      FULL=$(qs_get full)
+      if ! printf '%s\n' "$IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        STATUS="400 Bad Request"; BODY='{"error":"detail_requires_ip"}'
+      elif ! find_device_adb "$IP"; then
+        STATUS="404 Not Found"; BODY="{\"error\":\"not_found\",\"ip\":\"$IP\"}"
+      elif [ "$ADB_STATUS_OF" != "connected" ]; then
+        STATUS="409 Conflict"; BODY='{"error":"adb_not_connected"}'
+      else
+        # Satu permintaan live per HP: kalau sampel sebelumnya masih berjalan, tolak dengan 429
+        # (klien melewati siklus itu) supaya ADB tidak menumpuk saat HP lambat.
+        LOCK="/tmp/hpmon_live_${IP}.lock"
+        NOWS=$(date +%s); GOT=0
+        if mkdir "$LOCK" 2>/dev/null; then
+          GOT=1
+        else
+          OLD=$(cat "$LOCK/ts" 2>/dev/null)
+          case "$OLD" in
+            ''|*[!0-9]*)
+              [ -n "$(find "$LOCK" -maxdepth 0 -mmin +1 2>/dev/null)" ] && { rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null && GOT=1; } ;;
+            *)
+              if [ $((NOWS - OLD)) -gt 15 ]; then rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null && GOT=1; fi ;;
+          esac
+        fi
+        if [ "$GOT" != 1 ]; then
+          STATUS="429 Too Many Requests"; BODY='{"error":"busy"}'
+        else
+          echo "$NOWS" > "$LOCK/ts"
+          trap 'rm -rf "$LOCK"' EXIT INT TERM
+          CMD='echo "#up"; cat /proc/uptime; echo "#stat"; head -1 /proc/stat; echo "#mem"; grep -E "^(MemTotal|MemAvailable|MemFree):" /proc/meminfo; echo "#net"; grep "wlan0:" /proc/net/dev; echo "#cur"; cat /sys/class/power_supply/battery/current_now 2>/dev/null; echo "#bat"; dumpsys battery'
+          if [ "$FULL" = "1" ]; then
+            CMD="$CMD"'; echo "#pwr"; dumpsys power | grep mWakefulness=; echo "#wifi"; dumpsys wifi | grep "mWifiInfo SSID:" | head -1; echo "#win"; dumpsys window | grep mCurrentFocus | head -1'
+          fi
+          PING_F="/tmp/hpmon_live_ping_$$"
+          ping -c 1 -W 1 "$IP" >"$PING_F" 2>&1 &
+          PING_PID=$!
+          RAW=$(adb_live "$ADB_ADDR_OF" 5 "$CMD")
+          wait "$PING_PID" 2>/dev/null
+          PING_MS=$(sed -n 's/.*time=\([0-9.]*\) ms.*/\1/p' "$PING_F" 2>/dev/null | head -1)
+          rm -f "$PING_F"; rm -rf "$LOCK"
+          if ! printf '%s\n' "$RAW" | grep -q '^#up$'; then
+            STATUS="504 Gateway Timeout"; BODY='{"error":"adb_timeout"}'
+          else
+            # sect <nama>: isi bagian "#nama" dari keluaran HP; bget <kunci>: nilai "kunci: nilai" di dumpsys battery
+            sect() { printf '%s\n' "$RAW" | awk -v s="#$1" '$0==s{f=1;next} /^#[a-z]+$/{f=0} f'; }
+            bget() { sect bat | awk -F': *' -v k="$1" '{ gsub(/^[ \t]+/, "", $1) } $1==k { print $2; exit }'; }
+            UPS=$(sect up | awk '{print $1; exit}')
+            STATL=$(sect stat | head -1)
+            CPU_T=$(printf '%s\n' "$STATL" | awk '{print $2+$3+$4+$5+$6+$7+$8+$9}')
+            CPU_I=$(printf '%s\n' "$STATL" | awk '{print $5+$6}')
+            MEM=$(sect mem)
+            RAM_T=$(printf '%s\n' "$MEM" | awk '/^MemTotal:/{print $2; exit}')
+            RAM_A=$(printf '%s\n' "$MEM" | awk '/^MemAvailable:/{print $2; exit}')
+            [ -z "$RAM_A" ] && RAM_A=$(printf '%s\n' "$MEM" | awk '/^MemFree:/{print $2; exit}')
+            # /proc/net/dev: tanpa spasi setelah "wlan0:" bila angka rx besar, jadi buang awalan dulu
+            NETL=$(sect net | head -1 | sed 's/.*wlan0://')
+            NET_RX=$(printf '%s\n' "$NETL" | awk '{print $1}')
+            NET_TX=$(printf '%s\n' "$NETL" | awk '{print $9}')
+            B_LVL=$(bget level); B_ST=$(bget status); B_TEMP=$(bget temperature); B_VOLT=$(bget voltage)
+            B_CC=$(bget "Charge counter"); B_MAXC=$(bget "Max charging current")
+            B_SRC=""
+            [ "$(bget "AC powered")" = "true" ] && B_SRC="ac"
+            [ -z "$B_SRC" ] && [ "$(bget "USB powered")" = "true" ] && B_SRC="usb"
+            [ -z "$B_SRC" ] && [ "$(bget "Wireless powered")" = "true" ] && B_SRC="wireless"
+            # Arus: sysfs bila terbaca (satuan bisa dioverride per HP di current-unit.conf, sama
+            # seperti daemon). Bila tidak, klien memperkirakannya dari charge_counter_uah.
+            CUR_RAW=$(sect cur | head -1 | tr -d ' ')
+            CUR_MA=""; CUR_SRC=""
+            if printf '%s\n' "$CUR_RAW" | grep -Eq '^-?[0-9]+$'; then
+              CUNIT=$(awk -v ip="$IP" '$1==ip {print $2; exit}' "$CURRENT_UNIT_CONF" 2>/dev/null)
+              if [ "$CUNIT" = "ma" ]; then
+                CUR_MA=$(awk -v v="$CUR_RAW" 'BEGIN{printf "%.1f", v}')
+              else
+                CUR_MA=$(awk -v v="$CUR_RAW" 'BEGIN{printf "%.1f", v/1000}')
+              fi
+              CUR_SRC="sysfs"
+            fi
+            CACHE_MA=$(printf '%s' "$DEV_FOUND" | jq -r '.adb.current_ma // empty' 2>/dev/null)
+            CACHE_SRC=$(printf '%s' "$DEV_FOUND" | jq -r '.adb.current_source // empty' 2>/dev/null)
+            SL_SCREEN=""; SL_RSSI=""; SL_SSID=""; SL_PKG=""; SL_LABEL=""
+            if [ "$FULL" = "1" ]; then
+              SL_SCREEN=$(sect pwr | head -1 | awk -F'=' '{print $2}' | tr -d ' ')
+              WIFIL=$(sect wifi | head -1)
+              SL_RSSI=$(printf '%s\n' "$WIFIL" | sed -n 's/.*RSSI: \(-\{0,1\}[0-9][0-9]*\).*/\1/p' | head -1)
+              SL_SSID=$(printf '%s\n' "$WIFIL" | sed -n 's/.*[ ,{]SSID: \([^,]*\),.*/\1/p' | head -1 | tr -d '"')
+              FG_LINE=$(sect win | head -1)
+              if [ -n "$FG_LINE" ]; then
+                SL_PKG=$(printf '%s\n' "$FG_LINE" | sed -n 's/.* u[0-9][0-9]* \([^ /}][^ /}]*\)\/.*/\1/p')
+                [ -z "$SL_PKG" ] && SL_PKG=$(printf '%s\n' "$FG_LINE" | sed -n 's/.* \([^ /}][^ /}]*\)\/.*/\1/p')
+                if [ -n "$SL_PKG" ] && [ -f /etc/hpmon/app-labels.json ]; then
+                  SL_LABEL=$(jq -r --arg p "$SL_PKG" '.[$p] // empty' /etc/hpmon/app-labels.json 2>/dev/null)
+                fi
+              fi
+            fi
+            BODY=$(jq -n -c --arg ip "$IP" --arg ts "$NOWS" --arg up "$UPS" \
+              --arg cput "$CPU_T" --arg cpui "$CPU_I" --arg ramt "$RAM_T" --arg rama "$RAM_A" \
+              --arg rx "$NET_RX" --arg tx "$NET_TX" --arg ping "$PING_MS" \
+              --arg lvl "$B_LVL" --arg bst "$B_ST" --arg src "$B_SRC" --arg temp "$B_TEMP" --arg volt "$B_VOLT" \
+              --arg cc "$B_CC" --arg maxc "$B_MAXC" \
+              --arg curma "$CUR_MA" --arg cursrc "$CUR_SRC" --arg cachema "$CACHE_MA" --arg cachesrc "$CACHE_SRC" \
+              --arg full "$FULL" --arg screen "$SL_SCREEN" --arg rssi "$SL_RSSI" --arg ssid "$SL_SSID" \
+              --arg pkg "$SL_PKG" --arg label "$SL_LABEL" '
+              def n: if . == "" then null else (tonumber? // null) end;
+              def s: if . == "" then null else . end;
+              { ok: true, ip: $ip, ts: ($ts | n), up: ($up | n),
+                cpu: { total: ($cput | n), idle: ($cpui | n) },
+                ram: { total_kb: ($ramt | n), available_kb: ($rama | n) },
+                net: { rx: ($rx | n), tx: ($tx | n) },
+                ping_ms: ($ping | n),
+                battery: { level: ($lvl | n), status: ($bst | n),
+                           charging: (if $bst == "" then null else ($bst == "2") end),
+                           source: ($src | s),
+                           temp_c: (($temp | n) as $t | if $t == null then null else ($t / 10) end),
+                           voltage_mv: ($volt | n), charge_counter_uah: ($cc | n), max_charging_ua: ($maxc | n) },
+                current: { ma: ($curma | n), source: ($cursrc | s), cache_ma: ($cachema | n), cache_source: ($cachesrc | s) },
+                slow: (if $full == "1" then { screen: ($screen | s), rssi: ($rssi | n), ssid: ($ssid | s),
+                         foreground: { package: ($pkg | s), label: ($label | s) } } else null end) }')
+            [ -z "$BODY" ] && { STATUS="500 Internal Server Error"; BODY='{"error":"encode_failed"}'; }
+          fi
+        fi
+      fi
+      ;;
+    /location)
+      # Satu titik lokasi on-demand (tidak dilacak terus-menerus -- lihat helper-app).
+      IP=$(qs_get ip)
+      if ! printf '%s\n' "$IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        STATUS="400 Bad Request"; BODY='{"error":"detail_requires_ip"}'
+      elif ! find_device_adb "$IP"; then
+        STATUS="404 Not Found"; BODY="{\"error\":\"not_found\",\"ip\":\"$IP\"}"
+      elif [ "$ADB_STATUS_OF" != "connected" ]; then
+        STATUS="409 Conflict"; BODY='{"error":"adb_not_connected"}'
+      elif ! helper_installed "$ADB_ADDR_OF"; then
+        STATUS="409 Conflict"; BODY='{"error":"helper_not_installed"}'
+      else
+        T0=$(adb_t "$ADB_ADDR_OF" 'date +%s' | head -1)
+        adb_t "$ADB_ADDR_OF" "am broadcast -n ${HELPER_PKG}/.LocationReceiver -a ${HELPER_PKG}.READ_LOCATION" >/dev/null
+        # Dibatasi JAM DINDING lokal (date di router, bukan lewat adb) -- bukan jumlah
+        # percobaan -- karena tiap panggilan adb_t sendiri bisa makan waktu tidak tetap
+        # (lihat komentar di adb_t). Ini menjaga anggaran waktu nyata tetap ~20 dtk walau
+        # satu panggilan adb_t kebetulan lambat/cepat di shell tertentu.
+        RAW=""; START=$(date +%s)
+        while [ "$(($(date +%s) - START))" -lt 20 ]; do
+          RAW=$(adb_t "$ADB_ADDR_OF" "cat ${HELPER_DIR}/location.json" 2>/dev/null)
+          printf '%s' "$RAW" | jq -e . >/dev/null 2>&1 || { RAW=""; sleep 1; continue; }
+          RTS=$(printf '%s' "$RAW" | jq -r '.ts // 0')
+          # ts helper dalam milidetik; T0 dalam detik (jam HP yang sama) -- hasil dianggap baru
+          # kalau ditulis sesudah kita memicu broadcast (longgar 1 dtk untuk pembulatan).
+          [ -n "$T0" ] && [ "$((RTS / 1000))" -ge "$((T0 - 1))" ] && break
+          RAW=""; sleep 1
+        done
+        if [ -z "$RAW" ]; then
+          STATUS="504 Gateway Timeout"; BODY='{"error":"location_timeout"}'
+        else
+          ERRC=$(printf '%s' "$RAW" | jq -r '.error // empty')
+          if [ "$ERRC" = "permission_denied" ]; then
+            STATUS="403 Forbidden"; BODY='{"error":"location_permission_denied"}'
+          elif [ "$ERRC" = "location_disabled" ]; then
+            STATUS="409 Conflict"; BODY='{"error":"location_disabled"}'
+          elif [ "$ERRC" = "timeout" ]; then
+            STATUS="504 Gateway Timeout"; BODY='{"error":"location_timeout"}'
+          elif [ -n "$ERRC" ]; then
+            STATUS="500 Internal Server Error"; BODY="{\"error\":\"location_unknown\"}"
+          else
+            LAT=$(printf '%s' "$RAW" | jq -r '.lat')
+            LON=$(printf '%s' "$RAW" | jq -r '.lon')
+            ADDR=$(geocode_cached "$IP" "$LAT" "$LON")
+            BODY=$(printf '%s' "$RAW" | jq -c --arg ip "$IP" --arg addr "$ADDR" \
+              'del(.error) + {ok: true, ip: $ip, address: (if $addr == "" then null else $addr end)}')
+            [ -z "$BODY" ] && { STATUS="500 Internal Server Error"; BODY='{"error":"encode_failed"}'; }
+          fi
+        fi
+      fi
+      ;;
+    /usage)
+      # Ringkasan pemakaian hari ini (layar menyala total + 5 aplikasi teratas). Query lokal
+      # di HP, tidak perlu menunggu lama seperti /location -- budget jauh lebih kecil.
+      IP=$(qs_get ip)
+      if ! printf '%s\n' "$IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        STATUS="400 Bad Request"; BODY='{"error":"detail_requires_ip"}'
+      elif ! find_device_adb "$IP"; then
+        STATUS="404 Not Found"; BODY="{\"error\":\"not_found\",\"ip\":\"$IP\"}"
+      elif [ "$ADB_STATUS_OF" != "connected" ]; then
+        STATUS="409 Conflict"; BODY='{"error":"adb_not_connected"}'
+      elif ! helper_installed "$ADB_ADDR_OF"; then
+        STATUS="409 Conflict"; BODY='{"error":"helper_not_installed"}'
+      else
+        T0=$(adb_t "$ADB_ADDR_OF" 'date +%s' | head -1)
+        adb_t "$ADB_ADDR_OF" "am broadcast -n ${HELPER_PKG}/.UsageReceiver -a ${HELPER_PKG}.READ_USAGE" >/dev/null
+        RAW=""; START=$(date +%s)
+        while [ "$(($(date +%s) - START))" -lt 10 ]; do
+          RAW=$(adb_t "$ADB_ADDR_OF" "cat ${HELPER_DIR}/usage.json" 2>/dev/null)
+          printf '%s' "$RAW" | jq -e . >/dev/null 2>&1 || { RAW=""; sleep 1; continue; }
+          RTS=$(printf '%s' "$RAW" | jq -r '.ts // 0')
+          [ -n "$T0" ] && [ "$((RTS / 1000))" -ge "$((T0 - 1))" ] && break
+          RAW=""; sleep 1
+        done
+        if [ -z "$RAW" ]; then
+          STATUS="504 Gateway Timeout"; BODY='{"error":"usage_timeout"}'
+        else
+          ERRC=$(printf '%s' "$RAW" | jq -r '.error // empty')
+          if [ "$ERRC" = "usage_access_denied" ]; then
+            STATUS="403 Forbidden"; BODY='{"error":"usage_access_denied"}'
+          elif [ -n "$ERRC" ]; then
+            STATUS="500 Internal Server Error"; BODY='{"error":"usage_unknown"}'
+          else
+            BODY=$(printf '%s' "$RAW" | jq -c --arg ip "$IP" 'del(.error) + {ok: true, ip: $ip}')
+            [ -z "$BODY" ] && { STATUS="500 Internal Server Error"; BODY='{"error":"encode_failed"}'; }
+          fi
+        fi
       fi
       ;;
     /targets/add|/targets/delete)

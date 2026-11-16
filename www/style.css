@@ -287,3 +287,47 @@ button:active:not(:disabled) { transform: scale(.94); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Live di dashboard ---------- */
+.tools .btn-tool:only-child { grid-column: 1 / -1; }
+.live-panel { padding-bottom: 14px; }
+.lv-head { display: flex; align-items: center; gap: 10px; }
+.lv-head > label { margin: 0; flex: none; }
+.lv-head select { margin-left: auto; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 12px; }
+.live-status { font-size: 12px; color: var(--dim); display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-status::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+.live-status.ok::before { background: var(--green); animation: livepulse 1.4s ease-in-out infinite; }
+.live-status.err { color: var(--amber); }
+.live-status.err::before { background: var(--amber); }
+@keyframes livepulse { 50% { opacity: .35; } }
+.lv-sec { margin-top: 14px; }
+.lv-sec > label { display: block; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+.lv-gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.lv-g { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 8px 12px; text-align: center; }
+.lv-g .ring { margin: 0 auto; width: 96px; height: 96px; }
+.lv-g .ring-fill { animation: none !important; transition: stroke-dasharray .45s var(--ease), stroke .3s; }
+.lv-g .ring-fill.warm { stroke: var(--amber); }
+.lv-g .ring-fill.hot { stroke: var(--red); }
+.lv-g .ring-fill.cyan { stroke: var(--cyan); }
+.lv-g .ring-text { font-size: 24px; }
+.lv-name { font-weight: 600; font-size: 13px; margin-top: 4px; }
+.lv-sub { color: var(--dim); font-size: 12px; margin-top: 2px; min-height: 1.3em; }
+.lv-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.lv-n { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 12px; min-width: 0; }
+.lv-n b { display: block; font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lv-n span { display: block; font-size: 12px; color: var(--dim); margin-top: 2px; }
+.lv-n.wide { grid-column: 1 / -1; }
+.lv-n.big { display: flex; flex-direction: column; justify-content: center; text-align: center; }
+.lv-n.big b { font-size: 24px; }
+@media (prefers-reduced-motion: reduce) { .lv-g .ring-fill, .live-status.ok::before { transition: none; animation: none; } }
+
+/* ---------- Lokasi & pemakaian hari ini (panel .tools) ---------- */
+.tools .btn-tool:nth-child(3):last-child { grid-column: 1 / -1; }
+.panel.result .strong { font-weight: 600; font-size: 14px; }
+.panel.result a.btn-tool { text-decoration: none; }
+.usage-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.usage-row { display: grid; grid-template-columns: 1fr 2fr auto; align-items: center; gap: 8px; font-size: 13px; }
+.usage-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-bar { height: 7px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.usage-bar i { display: block; height: 100%; background: var(--primary); border-radius: 4px; }
+.usage-ms { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }

@@ -59,6 +59,38 @@ Kalau belum di-install di suatu HP, perilaku `current_ma` tetap sama seperti seb
 ini ada (`null`/`current_available:false` bila sysfs ditolak) — aman dipasang bertahap, satu
 HP dulu untuk diuji.
 
+## Lokasi dan pemakaian hari ini (v0.10.0+)
+
+Dua komponen tambahan, dipakai fitur "Lokasi" dan "Pemakaian hari ini" di aplikasi utama:
+
+- **`LocationReceiver` + `LocationFetchService`** — dipicu lewat broadcast
+  `READ_LOCATION`. Menampilkan **notifikasi** "adbWIFI: mengambil lokasi..." selama proses
+  (tidak diam-diam), minta satu titik lokasi (GPS kalau menyala, kalau tidak lewat
+  jaringan), tulis ke `location.json`, lalu berhenti sendiri — **tidak melacak lokasi terus-
+  menerus**, hanya saat diminta dari aplikasi kontroler.
+- **`UsageReceiver`** — dipicu lewat broadcast `READ_USAGE`. Query lokal cepat (riwayat
+  pemakaian hari ini), tulis ke `usage.json`.
+
+Keduanya butuh izin yang **tidak bisa muncul lewat dialog biasa** (tidak ada Activity di APK
+ini). Diberikan sekali per HP lewat ADB, **tanpa perlu menyentuh HP-nya sama sekali**:
+
+```sh
+adb -s <ip>:5555 shell pm grant com.irfanfrizki.adbwifihelper android.permission.ACCESS_FINE_LOCATION
+adb -s <ip>:5555 shell appops set com.irfanfrizki.adbwifihelper GET_USAGE_STATS allow
+```
+
+Tanpa langkah ini: `/location` menjawab `403 location_permission_denied`, `/usage` menjawab
+`403 usage_access_denied` — pesan jelas, bukan diam-diam gagal.
+
+Catatan:
+- Lokasi **on-demand saja**, sesuai desain — tidak butuh izin lokasi latar
+  (`ACCESS_BACKGROUND_LOCATION`), hanya izin lokasi biasa di atas.
+- Waktu layar menyala (`screen_on_ms` di `/usage`) hanya tersedia di Android 9 ke atas (API
+  event yang dipakai belum ada di versi lebih lama) — di SM-P355 (Android 7.1.1) akan
+  tampil `null`. Daftar 5 aplikasi teratas tetap berjalan di semua versi.
+- Transparansi lokasi dan pemakaian: siapa pun yang memegang HP ini akan melihat notifikasi
+  singkat tiap kali lokasi diminta. Tidak ada pelacakan tersembunyi di belakangnya.
+
 ## Build lokal (opsional)
 
 Proyek Gradle native biasa (bukan Capacitor), dibangun otomatis di CI (job `build-helper`

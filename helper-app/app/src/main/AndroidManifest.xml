@@ -12,6 +12,14 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Lokasi: dipakai LocationFetchService, hanya saat diminta (lihat README). Diberikan
+         sekali lewat `adb shell pm grant ... ACCESS_FINE_LOCATION`, tanpa dialog di HP. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Wajib ada untuk memanggil startForeground() di Android 9+ (dicek OS saat runtime,
+         bukan sekadar runtime permission, jadi tidak lewat dialog apa pun). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
     <application
         android:label="@string/app_name"
         android:allowBackup="false">
@@ -23,6 +31,30 @@
                 <action android:name="com.irfanfrizki.adbwifihelper.READ_CURRENT" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".LocationReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.irfanfrizki.adbwifihelper.READ_LOCATION" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".UsageReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.irfanfrizki.adbwifihelper.READ_USAGE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Sengaja TANPA android:foregroundServiceType (lihat catatan targetSdk 28 di
+             build.gradle): mendeklarasikannya butuh izin FOREGROUND_SERVICE_LOCATION
+             tambahan yang baru ditegakkan di targetSdk tinggi, yang justru proyek ini
+             hindari supaya tetap sederhana di semua versi Android 7.1-10 yang dipakai. -->
+        <service
+            android:name=".LocationFetchService"
+            android:exported="false" />
 
     </application>
 

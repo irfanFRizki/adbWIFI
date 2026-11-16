@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.10.0
+
+- **Lokasi** (tombol baru "Lokasi" di layar fokus): satu titik lokasi on-demand (bukan
+  dilacak terus-menerus) dari HP yang dipantau, lewat helper app yang diperluas. HP
+  menampilkan notifikasi singkat selama lokasi diambil -- tidak diam-diam. Hasil: koordinat,
+  alamat perkiraan (reverse-geocode lewat router, best-effort), akurasi, dan tautan "Buka di
+  peta".
+- **Pemakaian hari ini** (tombol baru): total waktu layar menyala hari ini (Android 9+) dan
+  5 aplikasi dengan waktu pemakaian terbanyak, lewat helper app.
+- Helper app (`helper-app/`) diperluas: `LocationReceiver`+`LocationFetchService` (lokasi,
+  butuh `pm grant ... ACCESS_FINE_LOCATION`) dan `UsageReceiver` (pemakaian, butuh
+  `appops set ... GET_USAGE_STATS allow`). Router baru: `GET /location`, `GET /usage`. Lihat
+  `helper-app/README.md` dan `docs/API.md`. **Helper app lama harus dipasang ulang** (APK
+  baru) di tiap HP yang mau memakai dua fitur ini, dan kedua perintah di atas dijalankan
+  sekali lewat ADB (tanpa menyentuh HP-nya).
+
+## v0.9.0
+
+- **Performa langsung di dashboard**: HP terpilih yang terhubung ADB otomatis menampilkan panel
+  gauge dan angka (CPU, RAM, baterai: level/arus/suhu/tegangan/status/sisa waktu, jaringan:
+  unduh/unggah/ping/sinyal WiFi, layar dan aplikasi aktif) yang diperbarui tiap 2 dtk (pilihan
+  1/2/5 dtk, diingat). Kartu HP di atas (cincin baterai, status mengisi, layar, WiFi, latensi)
+  ikut diperbarui langsung dari sampel Live, jadi tidak ada gauge baterai kedua di panel. Tanpa tombol; polling berhenti saat aplikasi ke latar atau HP berganti
+  ke yang tidak terhubung. Tombol "Cek performa" dan petak RAM/CPU lama dihapus; di bawahnya
+  tinggal tombol Screenshot.
+- Router: endpoint baru `GET /live?ip=` (satu panggilan ADB ringan, counter mentah, kunci
+  per-HP, batas 5 dtk). Lihat `docs/API.md`. Router wajib diperbarui agar Live bekerja.
+- Perhitungan CPU/jaringan memakai uptime HP sebagai dasar waktu; nilai yang belum bisa
+  dihitung (sampel pertama, HP reboot) tampil "—", bukan 0.
+
 ## v0.8.0
 
 - UI: beranda diganti jadi **"Fokus Satu HP"** dan seluruh aplikasi memakai tema gelap.

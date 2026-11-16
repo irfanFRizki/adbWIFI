@@ -60,6 +60,56 @@ Seperti di atas, ditambah objek `detail` yang diambil **langsung dari HP lewat A
 - `detail` bernilai `null` bila ADB target tidak terhubung.
 - `detail=1` tanpa `ip` → `400 {"error":"detail_requires_ip"}`.
 
+### `GET /live?ip=<ip>[&full=1]`
+Satu sampel ringan untuk **mode Live** di aplikasi (dipanggil tiap 1–5 dtk selama layar Live terbuka). Satu panggilan ADB, tanpa state di router: yang dikembalikan counter mentah dan klien yang menghitung selisihnya (CPU %, kecepatan jaringan, perkiraan arus). `full=1` menambah bagian lambat (`slow`: layar, WiFi, aplikasi aktif); aplikasi memintanya tiap sampel ke-5.
+
+```json
+{ "ok": true, "ip": "192.168.7.177", "ts": 1794676820, "up": 12345.67,
+  "cpu": { "total": 6378, "idle": 5040 },
+  "ram": { "total_kb": 3800000, "available_kb": 1900000 },
+  "net": { "rx": 123456789, "tx": 987654 },
+  "ping_ms": 3.41,
+  "battery": { "level": 57, "status": 2, "charging": true, "source": "ac", "temp_c": 30.1,
+               "voltage_mv": 4012, "charge_counter_uah": 2500000, "max_charging_ua": 500000 },
+  "current": { "ma": -450.0, "source": "sysfs", "cache_ma": 1125.0, "cache_source": "estimate" },
+  "slow": { "screen": "Awake", "rssi": -57, "ssid": "RumahNet",
+            "foreground": { "package": "com.whatsapp", "label": "WhatsApp" } } }
+```
+
+- `up` = uptime HP (detik); selisih waktu dihitung dari sini. `cpu`/`net` adalah counter kumulatif (`/proc/stat` baris `cpu`, `/proc/net/dev` `wlan0`).
+- `current.ma` terisi hanya bila sysfs `current_now` terbaca (satuan mengikuti `/etc/hpmon/current-unit.conf`); bila `null`, klien memperkirakan dari `battery.charge_counter_uah`.
+- Satu permintaan per HP pada satu waktu: bila sampel sebelumnya masih berjalan → `429 {"error":"busy"}` (klien melewati siklus). Batas ADB 5 dtk → `504 {"error":"adb_timeout"}`.
+- `400` → `detail_requires_ip`; `404` → `not_found`; `409` → `adb_not_connected`.
+
+### `GET /location?ip=<ip>`
+Satu titik lokasi **on-demand** (tidak dilacak terus-menerus) lewat helper app (lihat `helper-app/README.md`). HP menampilkan notifikasi singkat selama proses berlangsung -- bukan diam-diam. Budget ~20 dtk (menunggu fix GPS/jaringan).
+
+```json
+{ "ok": true, "ip": "192.168.7.177", "ts": 1794797524000,
+  "lat": -6.200000, "lon": 106.816666, "acc_m": 12.5, "provider": "gps", "age_s": 0,
+  "address": "Jalan Contoh, Jakarta Pusat, DKI Jakarta, Indonesia" }
+```
+
+- `provider`: `"gps"`, `"network"`, atau `"last_known"` (titik lama, dipakai hanya kalau fix baru gagal dalam waktu; lihat `age_s`).
+- `address`: hasil reverse-geocode (Nominatim/OpenStreetMap) lewat router, best-effort -- `null` kalau router tidak punya `wget` atau layanan tidak terjangkau. Di-cache 10 menit per IP.
+- `409 {"error":"helper_not_installed"}` kalau helper-app belum terpasang di HP ini.
+- `403 {"error":"location_permission_denied"}` kalau izin lokasi belum diberikan ke helper (lihat README untuk perintah `pm grant`).
+- `409 {"error":"location_disabled"}` kalau GPS dan lokasi jaringan sama-sama mati di HP.
+- `504 {"error":"location_timeout"}` kalau tidak ada fix dalam budget waktu.
+
+### `GET /usage?ip=<ip>`
+Ringkasan pemakaian **hari ini** (sejak 00:00 di HP) lewat helper app: total waktu layar menyala dan 5 aplikasi dengan waktu pemakaian terbanyak. Query lokal di HP, cepat (~beberapa detik).
+
+```json
+{ "ok": true, "ip": "192.168.7.177", "ts": 1794797780000, "date": "2026-11-16",
+  "screen_on_ms": 5412000,
+  "apps": [ { "pkg": "com.whatsapp", "label": "WhatsApp", "ms": 1800000 },
+            { "pkg": "com.roblox.client", "label": "Roblox", "ms": 1200000 } ] }
+```
+
+- `screen_on_ms`: `null` di Android di bawah 9 (API event layar belum ada di versi itu -- lihat README), termasuk SM-P355 (Android 7.1.1).
+- `409 {"error":"helper_not_installed"}`, `403 {"error":"usage_access_denied"}` (izin "Usage access" belum diberikan -- lihat README untuk perintah `appops set`), `504 {"error":"usage_timeout"}`.
+
 ### `GET /targets`
 Daftar konfigurasi target.
 
@@ -89,6 +139,11 @@ Menghapus target. Body: `{"ip":"192.168.7.188"}`. Berhasil → `{"ok":true}`.
 | 404 | Endpoint atau IP tidak dikenal (`not_found`) |
 | 405 | Metode HTTP salah (`method_not_allowed`) |
 | 409 | IP sudah terdaftar (`ip_duplicate`) |
+| 429 | `/live` untuk HP ini masih berjalan (`busy`) |
+| 504 | ADB tidak menjawab dalam batas waktu (`adb_timeout`) |
+| 409 | Helper app belum terpasang di HP ini (`helper_not_installed`) |
+| 403 | Izin lokasi/usage access belum diberikan ke helper (`location_permission_denied`, `usage_access_denied`) |
+| 504 | Tidak ada hasil dari helper dalam budget waktu (`location_timeout`, `usage_timeout`) |
 
 ## Skema data
 

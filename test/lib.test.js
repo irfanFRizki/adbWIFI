@@ -216,3 +216,102 @@ test('pemakaian RAM dari detail.ram', () => {
   assert.equal(L.ramUsage({ total_kb: 1000, available_kb: 'x' }), null);
   assert.equal(L.ramUsage({ total_kb: 1000, available_kb: 2000 }).pct, 0);
 });
+
+test('liveStep: CPU, jaringan, RAM dari counter mentah', () => {
+  const st = L.createLiveState();
+  const mk = (up, total, idle, rx, tx) => ({ up, cpu: { total, idle }, ram: { total_kb: 4000000, available_kb: 1000000 },
+    net: { rx, tx }, ping_ms: 3, battery: { level: 50 }, current: {} });
+  const a = L.liveStep(st, mk(100, 1000, 800, 0, 0));
+  assert.equal(a.cpu, null); // sampel pertama belum bisa dihitung
+  assert.equal(a.rx, null);
+  assert.equal(a.ram.pct, 75);
+  const b = L.liveStep(st, mk(102, 1200, 900, 200000, 20000));
+  assert.equal(b.cpu, 50);   // dT=200, dI=100
+  assert.equal(b.rx, 100000); // 200000 B / 2 dtk (uptime HP)
+  assert.equal(b.tx, 10000);
+  // HP reboot: uptime & counter mundur -> null, bukan angka negatif
+  const c = L.liveStep(st, mk(5, 50, 40, 10, 10));
+  assert.equal(c.cpu, null); assert.equal(c.rx, null);
+  // selisih uptime terlalu besar (>30 dtk) tidak dipakai
+  const d = L.liveStep(st, mk(100, 500, 400, 5000, 5000));
+  assert.equal(d.cpu, null);
+});
+
+test('liveStep: arus dari sysfs, perkiraan charge counter, lalu cache', () => {
+  const st = L.createLiveState();
+  const mk = (up, cc, ma, cache) => ({ up, cpu: { total: up, idle: 0 }, battery: { charge_counter_uah: cc },
+    current: { ma: ma === undefined ? null : ma, cache_ma: cache === undefined ? null : cache, cache_source: 'estimate' } });
+  assert.deepEqual(L.liveStep(st, mk(100, 2000000)).current, null); // belum ada dasar
+  assert.deepEqual(L.liveStep(st, mk(102, 2000000, undefined, 900)).current, { ma: 900, source: 'estimate' }); // cache
+  const e = L.liveStep(st, mk(112, 2000800)).current; // 800 uAh dalam 12 dtk
+  assert.equal(e.source, 'estimate'); assert.equal(Math.round(e.ma), 240);
+  assert.equal(Math.round(L.liveStep(st, mk(114, 2000800)).current.ma), 240); // dipertahankan sampai counter berubah
+  assert.equal(L.liveStep(st, mk(400, 2000800, undefined, 900)).current.ma, 900); // basi >180 dtk -> cache
+  assert.deepEqual(L.liveStep(st, mk(402, 2000800, -300)).current, { ma: -300, source: 'sysfs' }); // sysfs menang
+  // selisih counter < 1 mA tidak ditampilkan sebagai 0
+  const s2 = L.createLiveState();
+  L.liveStep(s2, mk(100, 1000000)); 
+  assert.equal(L.liveStep(s2, mk(200, 1000001)).current, null);
+});
+
+test('loadLevel dan api.live ke mock server', async () => {
+  assert.equal(L.loadLevel(10), 'ok'); assert.equal(L.loadLevel(60), 'warm');
+  assert.equal(L.loadLevel(85), 'hot'); assert.equal(L.loadLevel(null), '');
+  const { server, port, state } = await mock.start(0);
+  const base = 'http://127.0.0.1:' + port;
+  try {
+    const api = L.createApi({ getSettings: () => ({ urls: [base], token: mock.TOKEN }), transport: L.fetchTransport });
+    const r = await api.live('192.168.7.177', true);
+    assert.equal(r.ok, true); assert.equal(r.slow.foreground.label, 'WhatsApp');
+    const r2 = await api.live('192.168.7.177', false);
+    assert.equal(r2.slow, null);
+    state.liveBusy = true;
+    await assert.rejects(api.live('192.168.7.177'), (e) => e.code === 'busy' && e.status === 429);
+    state.liveBusy = false; state.liveTimeout = true;
+    await assert.rejects(api.live('192.168.7.177'), (e) => e.code === 'adb_timeout' && /tidak merespons/.test(L.errorMessage(e)));
+    await assert.rejects(api.live('1.2.3.4'), (e) => e.code === 'not_found');
+  } finally { server.close(); }
+});
+
+test('formatDuration', () => {
+  assert.equal(L.formatDuration(5412000), '1j 30m');
+  assert.equal(L.formatDuration(45000), '1m');
+  assert.equal(L.formatDuration(0), '<1m');
+  assert.equal(L.formatDuration(null), null);
+  assert.equal(L.formatDuration(-5), null);
+});
+
+test('api.location dan api.usage ke mock server', async () => {
+  const { server, port, state } = await mock.start(0);
+  const base = 'http://127.0.0.1:' + port;
+  try {
+    const api = L.createApi({ getSettings: () => ({ urls: [base], token: mock.TOKEN }), transport: L.fetchTransport });
+    const loc = await api.location('192.168.7.177');
+    assert.equal(loc.ok, true);
+    assert.equal(loc.provider, 'gps');
+    assert.ok(/Jakarta/.test(loc.address));
+
+    const us = await api.usage('192.168.7.177');
+    assert.equal(us.ok, true);
+    assert.equal(us.apps[0].label, 'WhatsApp');
+    assert.equal(L.formatDuration(us.screen_on_ms), '1j 30m');
+
+    state.helperMissing = true;
+    await assert.rejects(api.location('192.168.7.177'), (e) => e.code === 'helper_not_installed');
+    await assert.rejects(api.usage('192.168.7.177'), (e) => e.code === 'helper_not_installed');
+    state.helperMissing = false;
+
+    state.locationError = 'location_permission_denied'; state.locationStatus = 403;
+    await assert.rejects(api.location('192.168.7.177'), (e) => e.code === 'location_permission_denied' && /Izin lokasi/.test(L.errorMessage(e)));
+    state.locationError = null;
+
+    state.usageError = 'usage_access_denied';
+    await assert.rejects(api.usage('192.168.7.177'), (e) => e.code === 'usage_access_denied' && /riwayat pemakaian/.test(L.errorMessage(e)));
+
+    state.locationNoAddr = true;
+    const loc2 = await api.location('192.168.7.177');
+    assert.equal(loc2.address, null);
+
+    await assert.rejects(api.location('1.2.3.4'), (e) => e.code === 'not_found');
+  } finally { server.close(); }
+});
