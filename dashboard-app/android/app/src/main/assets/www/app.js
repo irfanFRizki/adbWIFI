@@ -310,7 +310,7 @@
       // Server lama mengirim cpuLoad=0 tanpa cpuSource: anggap tidak tersedia
       const cpuKnown = s.cpuLoad != null && s.cpuLoad >= 0 && !(s.cpuSource === undefined && s.cpuLoad === 0) && s.cpuSource !== 'none';
       const cpuPct = cpuKnown ? Math.round(s.cpuLoad) : 0;
-      const approx = s.cpuSource === 'freq' ? '≈' : '';
+      const approx = (s.cpuSource === 'freq' || s.cpuSource === 'load') ? '≈' : '';
       if (els.valRam) els.valRam.textContent = `RAM ${ramPct}% (${formatBytes(ramUsed)} / ${formatBytes(s.ramTotal)})`;
       if (els.valCpu) els.valCpu.textContent = cpuKnown ? `CPU ${approx}${cpuPct}%` : 'CPU n/a';
       if (els.valScreen) els.valScreen.textContent = s.screenOn ? 'ON' : 'OFF';
@@ -325,8 +325,14 @@
         els.barCpu.className = cpuPct > 85 ? 'low' : (cpuPct > 60 ? 'mid' : '');
       }
       if (els.footSys) {
-        els.footSys.textContent = `Model: ${s.model || '—'} • Android: ${s.androidVersion || '—'} • Uptime: ${formatUptime(s.uptime)}` +
-          (s.cpuSource === 'freq' ? ' • CPU diperkirakan dari frekuensi (Android membatasi pembacaan beban CPU)' : '');
+        const cpuNote = {
+          freq: ' • CPU: perkiraan dari frekuensi (sering menempel tinggi).',
+          load: ' • CPU: perkiraan dari rata-rata beban 1 menit (kurang realtime).',
+          none: ' • CPU: tidak bisa dibaca di HP ini.',
+        }[s.cpuSource] || '';
+        const hint = (s.cpuSource === 'freq' || s.cpuSource === 'load' || s.cpuSource === 'none')
+          ? ' Untuk CPU akurat jalankan sekali: adb shell pm grant com.irfanfrizki.telemetry.server android.permission.DUMP' : '';
+        els.footSys.textContent = `Model: ${s.model || '—'} • Android: ${s.androidVersion || '—'} • Uptime: ${formatUptime(s.uptime)}${cpuNote}${hint}`;
       }
     }
 

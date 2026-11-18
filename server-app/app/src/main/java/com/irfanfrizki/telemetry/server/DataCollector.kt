@@ -233,7 +233,8 @@ class DataCollector(private val context: Context) {
             put("ramUsed", used)
             put("ramPct", ramPct)
             put("cpuLoad", cpuPct)          // persen 0..100, -1 = tidak tersedia
-            put("cpuSource", cpuSource)     // "proc" (akurat) | "freq" (perkiraan) | "none"
+            put("cpuSource", cpuSource)     // "proc" | "dumpsys" (akurat) | "load" | "freq" (perkiraan) | "none"
+            put("cpuSources", cpuSourcesJson())
             put("screenOn", screenOn)
             put("uptime", SystemClock.elapsedRealtime())
             put("model", Build.MODEL)
@@ -251,9 +252,21 @@ class DataCollector(private val context: Context) {
     private var cpuSource = "none"
     private var cpuAt = 0L
 
+    // diagnosis: sumber mana yang bisa dipakai di HP ini (tampil di JSON: system.cpuSources)
+    private var srcProc = false
+    private var srcLoad = false
+    private var srcFreq = false
+    private var srcDumpsys: Boolean? = null // null = belum dicoba
+
+    private var dumpsysNextAt = 0L
+    private var dumpsysPct = -1.0
+
     /**
-     * Android 8+ melarang aplikasi membaca /proc/stat, jadi dicoba dulu (akurat),
-     * dan jika gagal diperkirakan dari frekuensi CPU saat ini vs min/max (perkiraan).
+     * Beban CPU tanpa root. Urutan sumber (yang pertama berhasil dipakai):
+     *  1. "proc"    : /proc/stat (akurat, tapi diblokir Android 8+)
+     *  2. "dumpsys" : `dumpsys cpuinfo` (akurat; butuh izin DUMP, diberikan sekali via adb)
+     *  3. "load"    : /proc/loadavg (rata-rata beban 1 menit / jumlah core; perkiraan, lambat berubah)
+     *  4. "freq"    : frekuensi CPU (perkiraan kasar; sering menempel 100% saat layar menyala/charging)
      * Tidak ada sleep: beban dihitung dari selisih dua pemanggilan berurutan.
      */
     @Synchronized
@@ -263,24 +276,74 @@ class DataCollector(private val context: Context) {
         cpuAt = now
 
         val proc = readProcStat()
+        srcProc = proc != null
+        var fromProc: Double? = null
         if (proc != null) {
             val (total, idle) = proc
             if (prevTotal > 0 && total > prevTotal) {
-                val dT = total - prevTotal
-                val dI = idle - prevIdle
-                cpuPct = ((1.0 - dI.toDouble() / dT) * 100.0).coerceIn(0.0, 100.0)
-                cpuSource = "proc"
-                prevTotal = total; prevIdle = idle
-                return
+                fromProc = ((1.0 - (idle - prevIdle).toDouble() / (total - prevTotal)) * 100.0).coerceIn(0.0, 100.0)
             }
             prevTotal = total; prevIdle = idle
         }
+        if (fromProc != null) { setCpu(fromProc, "proc"); return }
 
-        val f = readFreqLoad()
-        if (f != null) {
-            cpuPct = f; cpuSource = "freq"
-        } else if (cpuSource != "proc") {
-            cpuPct = -1.0; cpuSource = "none"
+        val fromDump = cpuFromDumpsys(now)
+        if (fromDump != null) { setCpu(fromDump, "dumpsys"); return }
+
+        val fromLoad = cpuFromLoadAvg()
+        srcLoad = fromLoad != null
+        val fromFreq = readFreqLoad()
+        srcFreq = fromFreq != null
+        when {
+            fromLoad != null -> setCpu(fromLoad, "load")
+            fromFreq != null -> setCpu(fromFreq, "freq")
+            else -> { cpuPct = -1.0; cpuSource = "none" }
+        }
+    }
+
+    private fun setCpu(pct: Double, source: String) {
+        cpuPct = pct
+        cpuSource = source
+    }
+
+    private fun cpuSourcesJson(): JSONObject = JSONObject().apply {
+        put("proc", srcProc)
+        put("dumpsys", srcDumpsys ?: JSONObject.NULL)
+        put("load", srcLoad)
+        put("freq", srcFreq)
+    }
+
+    private fun cpuFromDumpsys(now: Long): Double? {
+        if (now < dumpsysNextAt) return if (srcDumpsys == true) dumpsysPct else null
+        return try {
+            val p = ProcessBuilder("dumpsys", "cpuinfo").redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().use { it.readText() }
+            p.waitFor()
+            // Contoh baris:  "15% TOTAL: 8.4% user + 5.1% kernel + ..."
+            val m = Regex("""(?m)^\s*([0-9.]+)%\s+TOTAL:""").find(out)
+            if (m != null) {
+                dumpsysPct = m.groupValues[1].toDouble().coerceIn(0.0, 100.0)
+                srcDumpsys = true
+                dumpsysNextAt = now + 2000
+                dumpsysPct
+            } else {
+                srcDumpsys = false          // mis. "Permission Denial: ... android.permission.DUMP"
+                dumpsysNextAt = now + 60_000 // cek lagi tiap 1 menit (kalau izin baru diberikan)
+                null
+            }
+        } catch (_: Exception) {
+            srcDumpsys = false
+            dumpsysNextAt = now + 60_000
+            null
+        }
+    }
+
+    private fun cpuFromLoadAvg(): Double? {
+        return try {
+            val l1 = File("/proc/loadavg").readText().trim().split(" ")[0].toDouble()
+            (l1 / Runtime.getRuntime().availableProcessors() * 100.0).coerceIn(0.0, 100.0)
+        } catch (_: Exception) {
+            null
         }
     }
 
