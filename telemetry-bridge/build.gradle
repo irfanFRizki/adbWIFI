@@ -14,11 +14,11 @@ apply plugin: 'kotlin-android'
 
 android {
     namespace 'com.irfanfrizki.telemetry.bridge'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         minSdk 24
-        targetSdk 35
+        targetSdk 36
         consumerProguardFiles 'proguard-rules.pro'
     }
 
