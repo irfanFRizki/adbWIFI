@@ -21,14 +21,14 @@
     <string name="server_stopped_msg">Server stopped</string>
     <string name="invalid_config">Invalid configuration</string>
     <string name="permissions_needed">Location and Usage Stats permissions required</string>
-    <string name="grant_permissions">Beri Izin (Lokasi & Akses Penggunaan)</string>
+    <string name="grant_permissions">Beri Izin (Lokasi &amp; Akses Penggunaan)</string>
     <string name="perm_status_title">Izin</string>
     <string name="version_label">Versi terpasang: %1$s</string>
     <string name="check_update">Cek Update</string>
     <string name="checking_update">Memeriksa update…</string>
     <string name="update_available">Update tersedia: v%1$s</string>
     <string name="up_to_date">Sudah versi terbaru (v%1$s)</string>
-    <string name="download_update">Unduh & Pasang</string>
+    <string name="download_update">Unduh &amp; Pasang</string>
     <string name="downloading">Mengunduh… %1$d%%</string>
     <string name="update_error">Gagal cek update: %1$s</string>
     <string name="install_permission">Izinkan pemasangan dari aplikasi ini</string>
