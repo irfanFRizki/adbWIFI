@@ -73,6 +73,28 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-server-
 
+      # ── Tentukan versi server dari tag (lini 2.0.x) ──
+      - name: Tentukan versi server
+        id: srv_ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_VER="${GITHUB_REF_NAME#v}"
+            PATCH="${TAG_VER##*.}"
+          else
+            PATCH="0"
+          fi
+          if ! [[ "$PATCH" =~ ^[0-9]+$ ]]; then PATCH=0; fi
+          VERSION_NAME="2.0.${PATCH}"
+          VERSION_CODE=$((2000000 + 10#${PATCH}))
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+
+      - name: Tanam versi ke server build.gradle
+        run: |
+          sed -i "s/versionCode 1/versionCode ${{ steps.srv_ver.outputs.version_code }}/" server-app/app/build.gradle
+          sed -i "s/versionName '2.0.0'/versionName '${{ steps.srv_ver.outputs.version_name }}'/" server-app/app/build.gradle
+          grep -E "version(Code|Name)" server-app/app/build.gradle
+
       - name: Build Server Release APK
         run: gradle assembleRelease
         working-directory: ${{ github.workspace }}/server-app
@@ -80,8 +102,8 @@ jobs:
       - name: Get server version
         id: server_version
         run: |
-          VERSION=$(grep -oP "versionName\\s+'\\K[^']+" server-app/app/build.gradle | head -1)
-          echo "version=${VERSION:-2.0.0}" >> $GITHUB_OUTPUT
+          VERSION="${{ steps.srv_ver.outputs.version_name }}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Rename Server APK
         run: |

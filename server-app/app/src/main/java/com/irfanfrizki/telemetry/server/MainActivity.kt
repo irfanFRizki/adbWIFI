@@ -25,6 +25,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
+import com.irfanfrizki.telemetry.server.UpdateChecker
 
 class MainActivity : AppCompatActivity() {
 
@@ -47,6 +48,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cbBindAll: MaterialCheckBox
     private lateinit var tvPermStatus: TextView
     private lateinit var btnPermissions: Button
+    private lateinit var tvVersion: TextView
+    private lateinit var tvUpdateStatus: TextView
+    private lateinit var btnCheckUpdate: Button
+    private lateinit var updateChecker: UpdateChecker
+    private var latestRelease: UpdateChecker.Release? = null
 
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences("telemetry_server", Context.MODE_PRIVATE)
@@ -70,6 +76,11 @@ class MainActivity : AppCompatActivity() {
         cbBindAll = findViewById(R.id.cbBindAll)
         tvPermStatus = findViewById(R.id.tvPermStatus)
         btnPermissions = findViewById(R.id.btnPermissions)
+        tvVersion = findViewById(R.id.tvVersion)
+        tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
+        btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
+        updateChecker = UpdateChecker(this) { message -> tvUpdateStatus.text = message }
+        tvVersion.text = getString(R.string.version_label, updateChecker.currentVersion())
 
         loadSettings()
         updateUI()
@@ -79,12 +90,71 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener { saveSettings() }
         btnCopyWsUrl.setOnClickListener { copyWsUrl() }
         btnPermissions.setOnClickListener { requestBasicPermissions() }
+        btnCheckUpdate.setOnClickListener { checkForUpdate(manual = true) }
+        checkForUpdate(manual = false)
     }
 
     override fun onResume() {
         super.onResume()
         updatePermStatus()
         updateUI()
+    }
+
+
+    private fun checkForUpdate(manual: Boolean) {
+        if (manual) {
+            btnCheckUpdate.isEnabled = false
+            btnCheckUpdate.text = getString(R.string.checking_update)
+            tvUpdateStatus.text = ""
+        }
+        updateChecker.check(silent = !manual) { release ->
+            btnCheckUpdate.isEnabled = true
+            btnCheckUpdate.text = getString(R.string.check_update)
+            if (release == null) {
+                if (manual && tvUpdateStatus.text.isNullOrBlank()) {
+                    tvUpdateStatus.text = getString(R.string.update_error, "rili tidak ditemukan atau tidak dapat diakses")
+                }
+                return@check
+            }
+            if (!updateChecker.isNewer(release.version)) {
+                if (manual) tvUpdateStatus.text = getString(R.string.up_to_date, updateChecker.currentVersion())
+                return@check
+            }
+            latestRelease = release
+            showUpdateAvailable(release)
+        }
+    }
+
+    private fun showUpdateAvailable(release: UpdateChecker.Release) {
+        tvUpdateStatus.text = getString(R.string.update_available, release.version)
+        AlertDialog.Builder(this)
+            .setTitle("Update Telemetry Server tersedia")
+            .setMessage("Versi terpasang: v${updateChecker.currentVersion()}\nVersi terbaru: v${release.version}" +
+                if (release.notes.isNotBlank()) "\n\n${release.notes.take(1200)}" else "")
+            .setPositiveButton(getString(R.string.download_update)) { _, _ -> downloadAndInstall(release) }
+            .setNegativeButton("Nanti", null)
+            .show()
+    }
+
+    private fun downloadAndInstall(release: UpdateChecker.Release) {
+        btnCheckUpdate.isEnabled = false
+        updateChecker.download(release, { percent ->
+            btnCheckUpdate.text = getString(R.string.downloading, percent)
+        }) { apk ->
+            btnCheckUpdate.isEnabled = true
+            btnCheckUpdate.text = getString(R.string.check_update)
+            if (apk == null || !apk.exists()) {
+                tvUpdateStatus.text = getString(R.string.update_error, "unduhan gagal")
+                return@download
+            }
+            tvUpdateStatus.text = "Unduhan selesai"
+            try {
+                val started = updateChecker.install(apk)
+                if (!started) tvUpdateStatus.text = getString(R.string.install_permission)
+            } catch (e: Exception) {
+                tvUpdateStatus.text = getString(R.string.update_error, e.message ?: "gagal membuka pemasang")
+            }
+        }
     }
 
     // ===== Izin: lokasi -> lokasi latar belakang -> akses penggunaan =====
