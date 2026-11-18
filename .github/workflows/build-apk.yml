@@ -48,19 +48,21 @@ jobs:
           java-version: '21'
           cache: 'gradle'
 
-      - name: Setup Android SDK
+      - name: Setup Android SDK (minimal, no license acceptance)
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 'latest'
           packages: 'platform-tools'
-          accept-android-sdk-licenses: true
+          accept-android-sdk-licenses: false
 
-      - name: Ensure Android SDK packages
+      - name: Accept all Android SDK licenses
         run: |
-          yes | sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmdline-tools;latest" || true
+          yes | sdkmanager --licenses >/dev/null
         shell: bash
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Install required Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmdline-tools;latest"
         shell: bash
 
       - name: Cache Gradle
