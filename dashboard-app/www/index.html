@@ -16,6 +16,7 @@
 <header class="top">
   <div class="brand"><span class="pulse" id="pulse"></span><h1>Telemetry Server</h1></div>
   <div class="top-actions">
+    <select class="device-selector" id="deviceSelector" aria-label="Pilih perangkat" style="display:none;"></select>
     <button class="icon-btn" id="btnRefresh" aria-label="Segarkan">&#8635;</button>
     <button class="icon-btn" id="btnSettings" aria-label="Pengaturan">&#9881;</button>
   </div>
@@ -64,8 +65,14 @@
   </div>
 
   <section class="card card-raw full">
-    <div class="card-head"><h3>Data Mentah (JSON)</h3><button class="btn ghost small" id="btnCopyJson">Salin</button></div>
-    <pre id="rawJson" class="raw-json">—</pre>
+    <div class="card-head">
+      <h3>Data Mentah (JSON)</h3>
+      <div class="card-head-actions">
+        <button class="btn ghost small" id="btnToggleRaw" aria-label="Tampilkan/Sembunyikan JSON">Tampilkan</button>
+        <button class="btn ghost small" id="btnCopyJson" aria-label="Salin JSON">Salin</button>
+      </div>
+    </div>
+    <pre id="rawJson" class="raw-json hidden">—</pre>
   </section>
 </main>
 
@@ -88,9 +95,31 @@
     <div class="sheet-foot">
       <button type="button" class="btn ghost" id="btnStartServer">Mulai Server</button>
       <button type="button" class="btn ghost" id="btnStopServer">Hentikan Server</button>
+      <button type="button" class="btn ghost" id="btnManageDevices">Kelola Perangkat</button>
       <button type="submit" class="btn primary">Simpan</button>
     </div>
   </form>
+</div>
+
+<div id="layerDevices" class="layer hidden">
+  <div class="scrim" data-close></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="devTitle">
+    <div class="sheet-head"><div><h2 id="devTitle">Kelola Perangkat</h2><p class="sub mono">Tambah, hapus, atau pilih server telemetry</p></div><button class="icon-btn" data-close aria-label="Tutup">&#10005;</button></div>
+    <div id="devBody" class="sheet-body">
+      <div class="devices-list" id="devicesList"></div>
+      <hr style="margin:16px 0; border:none; border-top:1px solid var(--border);">
+      <h4>Tambah Perangkat Baru</h4>
+      <form id="formAddDevice" autocomplete="off" novalidate>
+        <label class="field"><span>Nama Perangkat</span><input id="addDevName" placeholder="mis. HP Kantor, HP Rumah" required></label>
+        <label class="field"><span>IP / Hostname Server</span><input id="addDevHost" placeholder="mis. 192.168.1.50 atau telemetry.local" required></label>
+        <label class="field"><span>Port HTTP</span><input id="addDevPort" inputmode="numeric" value="8080" required></label>
+        <label class="field"><span>Port WebSocket</span><input id="addDevWsPort" inputmode="numeric" value="8081" required></label>
+        <label class="field"><span>Token API (Bearer)</span><div class="row"><input id="addDevToken" type="password" autocapitalize="off" spellcheck="false"><button type="button" class="btn ghost small" id="addDevTokenToggle">Lihat</button></div></label>
+        <button type="submit" class="btn primary">Simpan Perangkat</button>
+      </form>
+    </div>
+    <div class="sheet-foot"><button class="btn ghost" data-close>Selesai</button></div>
+  </section>
 </div>
 
 <div id="layerDetail" class="layer hidden">
@@ -105,6 +134,7 @@
 <div id="toast" class="toast hidden" role="status"></div>
 
 <script src="version.js"></script>
+<script src="update-checker.js"></script>
 <script src="lib.js"></script>
 <script src="app.js"></script>
 </body>

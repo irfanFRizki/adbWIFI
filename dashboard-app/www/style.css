@@ -67,7 +67,14 @@ body {
   animation: pulse 1.6s ease-in-out infinite;
 }
 @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
-.top-actions { display: flex; gap: 6px; }
+.top-actions { display: flex; gap: 6px; align-items: center; }
+.device-selector { max-width: 150px; background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font: 0.75rem var(--sans); }
+.devices-list { display: flex; flex-direction: column; gap: 8px; }
+.device-entry { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.device-entry .device-meta { min-width: 0; }
+.device-entry .device-meta strong { display: block; }
+.device-entry .device-meta small { color: var(--muted); font-family: var(--mono); }
+.device-entry .device-controls { display: flex; gap: 6px; }
 .icon-btn {
   width: 40px; height: 40px; border: none; border-radius: 10px;
   background: var(--card); color: var(--fg); font-size: 1.1rem;
@@ -138,11 +145,13 @@ body {
 
 /* Raw JSON */
 .card-raw.full { grid-column: 1 / -1; }
+.card-head-actions { display: flex; gap: 8px; }
 .raw-json {
   background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
   padding: 12px; font-size: 0.7rem; line-height: 1.6; max-height: 280px; overflow: auto;
   white-space: pre-wrap; word-break: break-word;
 }
+.raw-json.hidden { display: none; }
 .card-head .btn.small { font-size: 0.7rem; padding: 4px 10px; }
 
 /* App list */

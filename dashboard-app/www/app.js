@@ -20,6 +20,11 @@
   let serverRunning = false;
   let wsUrl = null;
   let wsUnsub = null;
+  let deviceServers = {}; // { deviceId: { name, port, wsPort, token, bindAll, interval } }
+  let currentDeviceId = null;
+  let currentDevice = null;
+  let devices = [];
+  let isMultiDeviceMode = false;
 
   // ===== DOM refs =====
   const els = {
@@ -28,6 +33,19 @@
     banner: $('#banner'),
     btnRefresh: $('#btnRefresh'),
     btnSettings: $('#btnSettings'),
+    btnManageDevices: $('#btnManageDevices'),
+    deviceSelector: $('#deviceSelector'),
+    
+    // cards
+    layerDevices: $('#layerDevices'),
+    formAddDevice: $('#formAddDevice'),
+    devicesList: $('#devicesList'),
+    addDevName: $('#addDevName'),
+    addDevHost: $('#addDevHost'),
+    addDevPort: $('#addDevPort'),
+    addDevWsPort: $('#addDevWsPort'),
+    addDevToken: $('#addDevToken'),
+    addDevTokenToggle: $('#addDevTokenToggle'),
     // cards
     chipBatStatus: $('#chipBatStatus'),
     valBatLevel: $('#valBatLevel'),
@@ -64,6 +82,7 @@
     footApps: $('#footApps'),
 
     rawJson: $('#rawJson'),
+    btnToggleRaw: $('#btnToggleRaw'),
     btnCopyJson: $('#btnCopyJson'),
 
     // settings layer
@@ -314,24 +333,210 @@
     openLayer(els.layerDetail);
   }
 
+  // ===== Device Management =====
+  const DEVICES_STORAGE_KEY = 'telemetry_devices';
+  const CURRENT_DEVICE_STORAGE_KEY = 'telemetry_current_device';
+
+  async function loadDevices() {
+    try {
+      const stored = await T.prefGet(DEVICES_STORAGE_KEY, null);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          devices = parsed;
+        }
+      }
+    } catch (_) {}
+    // Load current device selection
+    try {
+      currentDeviceId = await T.prefGet(CURRENT_DEVICE_STORAGE_KEY, null);
+    } catch (_) {}
+  }
+
+  async function saveDevices() {
+    await T.prefSet(DEVICES_STORAGE_KEY, JSON.stringify(devices));
+  }
+
+  function renderDevicesList() {
+    if (!els.devicesList) return;
+    if (!devices.length) {
+      els.devicesList.innerHTML = '<p class="hint">Belum ada perangkat. Tambah server telemetry di bawah.</p>';
+      return;
+    }
+    els.devicesList.innerHTML = devices.map((dev, idx) => {
+      const isCurrent = dev.id === currentDeviceId;
+      return `
+        <div class="device-entry">
+          <div class="device-meta">
+            <strong>${dev.name}</strong>
+            <small>${dev.host}:${dev.port} / WS ${dev.wsPort} ${dev.token ? '• Token' : ''}</small>
+          </div>
+          <div class="device-controls">
+            ${isCurrent ? '<span class="chip ok">Aktif</span>' : ''}
+            ${!isCurrent ? `<button class="btn ghost small" data-dev-select="${dev.id}">Pilih</button>` : ''}
+            <button class="btn ghost small" data-dev-delete="${dev.id}">Hapus</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderDeviceSelector() {
+    if (!els.deviceSelector) return;
+    if (!devices.length) {
+      els.deviceSelector.style.display = 'none';
+      return;
+    }
+    els.deviceSelector.style.display = 'block';
+    els.deviceSelector.innerHTML = devices.map(dev =>
+      `<option value="${dev.id}" ${dev.id === currentDeviceId ? 'selected' : ''}>${dev.name}</option>`
+    ).join('');
+  }
+
+  async function selectDevice(deviceId) {
+    const dev = devices.find(d => d.id === deviceId);
+    if (!dev) return;
+    currentDeviceId = deviceId;
+    currentDevice = dev;
+    await T.prefSet(CURRENT_DEVICE_STORAGE_KEY, deviceId);
+    renderDeviceSelector();
+    renderDevicesList();
+    // Update WS URL and reconnect
+    wsUrl = `ws://${dev.host}:${dev.wsPort}${dev.token ? '?token=' + encodeURIComponent(dev.token) : ''}`;
+    if (wsUnsub) wsUnsub();
+    wsUnsub = T.wsOn(handleWsMessage);
+    T.wsConnect(wsUrl);
+    showBanner(`Terhubung ke ${dev.name}`, 'ok');
+  }
+
+  function openDevicesLayer() {
+    renderDevicesList();
+    openLayer(els.layerDevices);
+  }
+
+  async function onAddDevice(e) {
+    e.preventDefault();
+    const name = els.addDevName.value.trim();
+    const host = els.addDevHost.value.trim();
+    const port = parseInt(els.addDevPort.value, 10);
+    const wsPort = parseInt(els.addDevWsPort.value, 10);
+    const token = els.addDevToken.value.trim();
+    if (!name || !host || isNaN(port) || isNaN(wsPort)) {
+      showToast('Isi semua kolom wajib', true);
+      return;
+    }
+    if (port < 1024 || port > 65535 || wsPort < 1024 || wsPort > 65535) {
+      showToast('Port tidak valid (1024-65535)', true);
+      return;
+    }
+    if (port === wsPort) {
+      showToast('Port HTTP dan WS harus berbeda', true);
+      return;
+    }
+    const newDev = {
+      id: 'dev_' + Date.now(),
+      name,
+      host,
+      port,
+      wsPort,
+      token,
+    };
+    devices.push(newDev);
+    await saveDevices();
+    renderDevicesList();
+    renderDeviceSelector();
+    // clear form
+    els.addDevName.value = '';
+    els.addDevHost.value = '';
+    els.addDevPort.value = '8080';
+    els.addDevWsPort.value = '8081';
+    els.addDevToken.value = '';
+    showToast('Perangkat ditambahkan');
+  }
+
+  async function onDeleteDevice(deviceId) {
+    if (!confirm('Hapus perangkat ini?')) return;
+    devices = devices.filter(d => d.id !== deviceId);
+    await saveDevices();
+    if (currentDeviceId === deviceId) {
+      currentDeviceId = devices[0]?.id || null;
+      currentDevice = devices[0] || null;
+      await T.prefSet(CURRENT_DEVICE_STORAGE_KEY, currentDeviceId);
+      if (currentDevice) {
+        wsUrl = `ws://${currentDevice.host}:${currentDevice.wsPort}${currentDevice.token ? '?token=' + encodeURIComponent(currentDevice.token) : ''}`;
+        if (wsUnsub) wsUnsub();
+        wsUnsub = T.wsOn(handleWsMessage);
+        T.wsConnect(wsUrl);
+      } else {
+        T.wsDisconnect();
+        wsUrl = null;
+      }
+    }
+    renderDevicesList();
+    renderDeviceSelector();
+    showToast('Perangkat dihapus');
+  }
+
+  function onTokenToggleAdd() {
+    const isPwd = els.addDevToken.type === 'password';
+    els.addDevToken.type = isPwd ? 'text' : 'password';
+    els.addDevTokenToggle.textContent = isPwd ? 'Sembunyikan' : 'Lihat';
+  }
+
   // ===== Copy JSON =====
   async function copyJson() {
     try {
       await navigator.clipboard.writeText(els.rawJson.textContent);
       showToast('JSON disalin');
     } catch (_) {
-      showToast('Gagal salin', true);
+      // fallback: pilih teks lalu perintah copy (WebView lama sering blokir clipboard API)
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(els.rawJson);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('copy');
+        sel.removeAllRanges();
+        showToast('JSON disalin');
+      } catch (__) {
+        showToast('Gagal salin', true);
+      }
     }
+  }
+
+  // ===== Toggle raw JSON =====
+  function toggleRaw() {
+    const hidden = els.rawJson.classList.toggle('hidden');
+    els.btnToggleRaw.textContent = hidden ? 'Tampilkan' : 'Sembunyikan';
+    if (!hidden) els.rawJson.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   // ===== Event bindings =====
   els.btnSettings.addEventListener('click', () => { populateSettings(); openLayer(els.layerSettings); });
+  els.btnManageDevices.addEventListener('click', () => { closeLayer(els.layerSettings); openDevicesLayer(); });
+  els.deviceSelector.addEventListener('dblclick', openDevicesLayer);
+  els.btnManageDevices.style.display = 'inline-flex';
+  els.deviceSelector.title = 'Pilih perangkat; buka Pengaturan untuk mengelola daftar';
   els.btnRefresh.addEventListener('click', () => nativeGetData().then(render));
   els.formSettings.addEventListener('submit', onSaveSettings);
   els.tokenToggle.addEventListener('click', onTokenToggle);
   els.btnStartServer.addEventListener('click', onStartServer);
   els.btnStopServer.addEventListener('click', onStopServer);
+  els.btnToggleRaw.addEventListener('click', toggleRaw);
   els.btnCopyJson.addEventListener('click', copyJson);
+
+  // Device management bindings
+  els.deviceSelector.addEventListener('change', (e) => selectDevice(e.target.value));
+  els.formAddDevice.addEventListener('submit', onAddDevice);
+  els.addDevTokenToggle.addEventListener('click', onTokenToggleAdd);
+  // delegate for device list buttons
+  els.devicesList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-dev-select]');
+    if (btn) { selectDevice(btn.dataset.devSelect); return; }
+    const delBtn = e.target.closest('[data-dev-delete]');
+    if (delBtn) { onDeleteDevice(delBtn.dataset.devDelete); }
+  });
 
   // close layers on scrim click
   $$('[data-close]').forEach(btn => {
@@ -346,7 +551,14 @@
     await initCapacitor();
     settings = await loadSettings();
 
-    // check server status
+    // load devices and connect
+    await loadDevices();
+    renderDeviceSelector();
+    if (currentDeviceId) {
+      await selectDevice(currentDeviceId);
+    }
+
+    // check server status (local server, not remote devices)
     const status = await nativeGetServerStatus();
     serverRunning = status.running || false;
     if (serverRunning) {

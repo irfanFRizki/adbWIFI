@@ -80,7 +80,7 @@ jobs:
       - name: Get server version
         id: server_version
         run: |
-          VERSION=$(grep -oP "versionName\s+'\K[^']+" server-app/app/build.gradle | head -1)
+          VERSION=$(grep -oP "versionName\\s+'\\K[^']+" server-app/app/build.gradle | head -1)
           echo "version=${VERSION:-2.0.0}" >> $GITHUB_OUTPUT
 
       - name: Rename Server APK
@@ -147,6 +147,35 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-dashboard-
 
+      # ── Tentukan versionName & versionCode dari git tag (sama seperti kalender-PL) ──
+      - name: Tentukan versionName & versionCode
+        id: dash_ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION_NAME="${GITHUB_REF_NAME#v}"
+          else
+            VERSION_NAME="0.0.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          if [[ "${VERSION_NAME}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            VERSION_CODE=$((10#${BASH_REMATCH[1]} * 1000000 + 10#${BASH_REMATCH[2]} * 1000 + 10#${BASH_REMATCH[3]}))
+          else
+            VERSION_CODE=$((100000000 + GITHUB_RUN_NUMBER))
+          fi
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+
+      # ── Tanam versi ke web assets (version.js, update-checker.js) SEBELUM build ──
+      - name: Tanam versi ke dashboard web assets
+        run: |
+          sed -i "s/__APP_VERSION__/${{ steps.dash_ver.outputs.version_name }}/" dashboard-app/www/version.js
+          sed -i "s/__APP_VERSION__/${{ steps.dash_ver.outputs.version_name }}/" dashboard-app/www/update-checker.js
+
+      # ── Update versionName & versionCode di build.gradle ──
+      - name: Update build.gradle version
+        run: |
+          sed -i "s/versionCode 1/versionCode ${{ steps.dash_ver.outputs.version_code }}/" dashboard-app/android/app/build.gradle
+          sed -i "s/versionName \"2.0.0\"/versionName \"${{ steps.dash_ver.outputs.version_name }}\"/" dashboard-app/android/app/build.gradle
+
       - name: Build Dashboard Release APK
         run: gradle assembleRelease
         working-directory: ${{ github.workspace }}/dashboard-app/android
@@ -154,8 +183,8 @@ jobs:
       - name: Get dashboard version
         id: dash_version
         run: |
-          VERSION=$(grep -oP "versionName\s+'\K[^']+" dashboard-app/android/app/build.gradle | head -1)
-          echo "version=${VERSION:-2.0.0}" >> $GITHUB_OUTPUT
+          VERSION="${{ steps.dash_ver.outputs.version_name }}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Rename Dashboard APK
         run: |
