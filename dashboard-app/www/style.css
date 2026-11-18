@@ -158,8 +158,9 @@ body {
 /* ===== Layers (modals) ===== */
 .layer { position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-end; }
 .layer.hidden { display: none; }
-.scrim { position: absolute; inset: 0; background: #000a; backdrop-filter: blur(4px); }
+.scrim { position: absolute; inset: 0; z-index: 0; background: #000a; backdrop-filter: blur(4px); }
 .sheet {
+  position: relative; z-index: 1;
   width: 100%; max-width: 100%; background: var(--bg-elev); border-radius: var(--radius) var(--radius) 0 0;
   border: 1px solid var(--border); border-bottom: none; box-shadow: var(--shadow);
   animation: slideUp 0.25s ease-out;
