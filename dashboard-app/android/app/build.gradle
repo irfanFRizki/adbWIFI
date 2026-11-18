@@ -13,9 +13,19 @@ android {
         versionName "2.0.0"
     }
 
+    signingConfigs {
+        release {
+            storeFile rootProject.file('../../ci/adbwifi.keystore')
+            storePassword 'adbwifi-ci'
+            keyAlias 'adbwifi'
+            keyPassword 'adbwifi-ci'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
         }
     }
 

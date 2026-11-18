@@ -85,7 +85,7 @@ jobs:
 
       - name: Rename Server APK
         run: |
-          APK_PATH="server-app/app/build/outputs/apk/release/app-release-unsigned.apk"
+          APK_PATH="server-app/app/build/outputs/apk/release/app-release.apk"
           NEW_NAME="TelemetryServer-v${{ steps.server_version.outputs.version }}.apk"
           cp "$APK_PATH" "$NEW_NAME"
           echo "apk=$NEW_NAME" >> $GITHUB_OUTPUT
@@ -159,7 +159,7 @@ jobs:
 
       - name: Rename Dashboard APK
         run: |
-          APK_PATH="dashboard-app/android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          APK_PATH="dashboard-app/android/app/build/outputs/apk/release/app-release.apk"
           NEW_NAME="TelemetryDashboard-v${{ steps.dash_version.outputs.version }}.apk"
           cp "$APK_PATH" "$NEW_NAME"
           echo "apk=$NEW_NAME" >> $GITHUB_OUTPUT
