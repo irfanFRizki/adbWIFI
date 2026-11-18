@@ -1,6 +1,6 @@
 {
   "name": "telemetry-server",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Android Telemetry Server — expose sensor data via HTTP/WebSocket, no ADB/router needed.",
   "license": "MIT",
