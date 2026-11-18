@@ -51,14 +51,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 35
-          ndk-version: r27b
           cmdline-tools-version: 'latest'
-          tools: ''
-          emulator: false
+          packages: 'platform-tools'
+          accept-android-sdk-licenses: true
 
       - name: Ensure Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmdline-tools;latest" --licenses <<<'y' || true
+        run: |
+          yes | sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmdline-tools;latest" || true
         shell: bash
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses >/dev/null || true
