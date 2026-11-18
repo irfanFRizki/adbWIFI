@@ -1,0 +1,19 @@
+{
+  "name": "telemetry-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Capacitor plugin for Telemetry Server native bridge",
+  "main": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "scripts": {
+    "build": "node --check dist/esm/index.js"
+  },
+  "capacitor": {
+    "android": {
+      "src": "src/main"
+    }
+  },
+  "keywords": ["capacitor", "plugin", "telemetry"],
+  "author": "irfanFRizki",
+  "license": "MIT"
+}

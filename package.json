@@ -1,19 +1,24 @@
 {
-  "name": "adbwifi-monitor",
-  "version": "0.10.0",
+  "name": "telemetry-server",
+  "version": "1.0.0",
   "private": true,
-  "description": "Aplikasi Android untuk memantau HP di WiFi OpenWrt lewat API hpmon (ADB di router).",
+  "description": "Android Telemetry Server — expose sensor data via HTTP/WebSocket, no ADB/router needed.",
   "license": "MIT",
   "author": "irfanFRizki",
   "scripts": {
     "test": "node --test test/lib.test.js",
-    "check": "node --check www/lib.js && node --check www/app.js"
+    "check": "node --check www/lib.js && node --check www/app.js",
+    "cap:add": "npx cap add android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
-    "@capacitor/app": "8.1.2",
+    "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.6.0",
-    "@capacitor/preferences": "^8.0.1"
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/network": "^8.0.1",
+    "telemetry-bridge": "file:./telemetry-bridge"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.6.0"

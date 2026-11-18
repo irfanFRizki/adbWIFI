@@ -1,497 +1,258 @@
-/* HPLib — logika murni (tanpa DOM) supaya bisa diuji dengan Node.
- * Dipakai oleh app.js di WebView dan oleh test/ di Node. */
-(function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.HPLib = factory();
-})(typeof self !== 'undefined' ? self : this, function () {
+/**
+ * Telemetry Server — pure logic (no DOM).
+ * Loads before app.js in index.html.
+ */
+
+const TelemetryLib = (() => {
   'use strict';
 
-  var DEFAULT_PATH = '/cgi-bin/hpmon/index.sh';
+  // ===== Util =====
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+  const throttle = (fn, ms) => { let last = 0; return (...a) => { const now = Date.now(); if (now - last >= ms) { last = now; fn(...a); } }; };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  /* ---------- validasi & format ---------- */
+  // ===== Storage keys =====
+  const STORAGE = {
+    PORT: 'ts.port',
+    WS_PORT: 'ts.wsPort',
+    TOKEN: 'ts.token',
+    BIND_ALL: 'ts.bindAll',
+    INTERVAL: 'ts.interval',
+    SERVER_RUNNING: 'ts.serverRunning',
+    LAST_DATA: 'ts.lastData',
+    WS_URL: 'ts.wsUrl',
+  };
 
-  function isValidIPv4(ip) {
-    if (typeof ip !== 'string') return false;
-    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip.trim());
-    if (!m) return false;
-    for (var i = 1; i <= 4; i++) if (Number(m[i]) > 255) return false;
-    return true;
+  // ===== Capacitor bridge (native) =====
+  let CapacitorRef = null;
+  let Preferences = null;
+  let Network = null;
+  let App = null;
+  let NativeBridge = null;
+
+  async function initCapacitor() {
+    if (typeof window !== 'undefined' && window.Capacitor) {
+      CapacitorRef = window.Capacitor;
+      try {
+        const modPrefs = await import('@capacitor/preferences');
+        Preferences = modPrefs.Preferences;
+      } catch (_) { /* ignore */ }
+      try {
+        const modNet = await import('@capacitor/network');
+        Network = modNet.Network;
+      } catch (_) { /* ignore */ }
+      try {
+        const modApp = await import('@capacitor/app');
+        App = modApp.App;
+      } catch (_) { /* ignore */ }
+
+      // Try to get native plugin from Capacitor.Plugins first, then register
+      try {
+        if (CapacitorRef.Plugins && CapacitorRef.Plugins.TelemetryBridge) {
+          NativeBridge = CapacitorRef.Plugins.TelemetryBridge;
+        } else if (CapacitorRef.registerPlugin) {
+          NativeBridge = CapacitorRef.registerPlugin('TelemetryBridge');
+        }
+      } catch (_) { /* ignore */ }
+    }
+    return !!CapacitorRef;
   }
 
-  function isValidPort(p) {
-    var n = Number(p);
-    return Number.isInteger(n) && n >= 1 && n <= 65535;
+  // ===== Preferences wrapper =====
+  async function prefGet(key, fallback = null) {
+    if (Preferences) {
+      try {
+        const { value } = await Preferences.get({ key });
+        return value ?? fallback;
+      } catch (_) {}
+    }
+    try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; }
   }
 
-  /* "192.168.7.1" -> "http://192.168.7.1/cgi-bin/hpmon/index.sh"
-   * Alamat lengkap dipertahankan; akhiran /status atau /targets dibuang. */
-  function normalizeBaseUrl(input) {
-    var s = String(input == null ? '' : input).trim();
-    if (!s) return '';
-    if (!/^https?:\/\//i.test(s)) s = 'http://' + s;
-    s = s.replace(/\/+$/, '');
-    s = s.replace(/\/(status|targets)(\/[^?#]*)?$/i, '');
-    var u;
-    try { u = new URL(s); } catch (e) { return ''; }
-    if (!u.hostname) return '';
-    if (u.pathname === '/' || u.pathname === '') s = s.replace(/\/+$/, '') + DEFAULT_PATH;
+  async function prefSet(key, value) {
+    if (Preferences) {
+      try { await Preferences.set({ key, value: String(value) }); return; } catch (_) {}
+    }
+    try { localStorage.setItem(key, String(value)); } catch (_) {}
+  }
+
+  async function prefRemove(key) {
+    if (Preferences) {
+      try { await Preferences.remove({ key }); return; } catch (_) {}
+    }
+    try { localStorage.removeItem(key); } catch (_) {}
+  }
+
+  // ===== Settings =====
+  const defaults = {
+    port: 8080,
+    wsPort: 8081,
+    token: '',
+    bindAll: '1',
+    interval: '2',
+  };
+
+  async function loadSettings() {
+    const s = {};
+    for (const [k, def] of Object.entries(defaults)) {
+      const stored = await prefGet(STORAGE[k.toUpperCase()] || `ts.${k}`, def);
+      s[k] = stored;
+    }
     return s;
   }
 
-  function escapeHtml(v) {
-    return String(v == null ? '' : v)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  async function saveSettings(s) {
+    for (const [k, v] of Object.entries(s)) {
+      const key = STORAGE[k.toUpperCase()] || `ts.${k}`;
+      await prefSet(key, v);
+    }
   }
 
-  function formatBytes(n) {
-    if (n === null || n === undefined || isNaN(n)) return '—';
-    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var i = 0, v = Number(n);
+  // ===== Native calls =====
+  async function nativeStartServer(cfg) {
+    if (NativeBridge && NativeBridge.startServer) {
+      try { return await NativeBridge.startServer(cfg); } catch (e) { return { success: false, error: e.message || String(e) }; }
+    }
+    return { success: false, error: 'Native bridge not available' };
+  }
+
+  async function nativeStopServer() {
+    if (NativeBridge && NativeBridge.stopServer) {
+      try { return await NativeBridge.stopServer(); } catch (e) { return { success: false, error: e.message || String(e) }; }
+    }
+    return { success: false, error: 'Native bridge not available' };
+  }
+
+  async function nativeGetServerStatus() {
+    if (NativeBridge && NativeBridge.getServerStatus) {
+      try { return await NativeBridge.getServerStatus(); } catch (_) {}
+    }
+    return { running: false };
+  }
+
+  async function nativeGetData() {
+    if (NativeBridge && NativeBridge.getData) {
+      try { return await NativeBridge.getData(); } catch (_) {}
+    }
+    return null;
+  }
+
+  async function nativeGetWsUrl() {
+    if (NativeBridge && NativeBridge.getWsUrl) {
+      try { return await NativeBridge.getWsUrl(); } catch (_) {}
+    }
+    return null;
+  }
+
+  async function nativeRequestPermissions() {
+    if (NativeBridge && NativeBridge.requestPermissions) {
+      try { return await NativeBridge.requestPermissions(); } catch (_) {}
+    }
+    return { granted: [] };
+  }
+
+  // ===== Data parsing / formatting =====
+  function formatBytes(bytes) {
+    if (bytes === null || bytes === undefined || isNaN(bytes)) return '—';
+    const units = ['B','KB','MB','GB','TB'];
+    let i = 0;
+    let v = Number(bytes);
     while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-    var digits = i === 0 ? 0 : (v >= 100 ? 0 : (v >= 10 ? 1 : 2));
-    return v.toFixed(digits) + ' ' + units[i];
+    return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
   }
 
-  function formatRate(bps) {
-    if (bps === null || bps === undefined || isNaN(bps)) return '—';
-    return formatBytes(bps) + '/s';
+  function formatMs(ms) {
+    if (!ms || ms < 0) return '—';
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    if (h > 0) return `${h}j ${m % 60}m`;
+    if (m > 0) return `${m}m ${s % 60}d`;
+    return `${s}d`;
   }
 
-  function formatUptime(sec) {
-    if (sec === null || sec === undefined || isNaN(sec)) return '—';
-    sec = Math.floor(Number(sec));
-    var d = Math.floor(sec / 86400);
-    var h = Math.floor((sec % 86400) / 3600);
-    var m = Math.floor((sec % 3600) / 60);
-    if (d > 0) return d + ' hari ' + h + ' jam';
-    if (h > 0) return h + ' jam ' + m + ' mnt';
-    return m + ' mnt';
+  function formatUptime(ms) {
+    if (!ms || ms < 0) return '—';
+    const sec = Math.floor(ms / 1000);
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const parts = [];
+    if (d) parts.push(`${d}h`);
+    if (h) parts.push(`${h}j`);
+    if (m) parts.push(`${m}m`);
+    if (s || !parts.length) parts.push(`${s}d`);
+    return parts.join(' ');
   }
 
-  function formatAge(seconds) {
-    if (seconds === null || seconds === undefined || isNaN(seconds)) return '—';
-    seconds = Math.max(0, Math.floor(seconds));
-    if (seconds < 60) return seconds + ' dtk';
-    if (seconds < 3600) return Math.floor(seconds / 60) + ' mnt';
-    return Math.floor(seconds / 3600) + ' jam';
+  function formatSignal(rssi) {
+    if (rssi === null || rssi === undefined) return '—';
+    if (rssi >= -50) return 'Sangat baik';
+    if (rssi >= -60) return 'Baik';
+    if (rssi >= -70) return 'Cukup';
+    if (rssi >= -80) return 'Lemah';
+    return 'Sangat lemah';
   }
 
-  /* "146.039 ms" -> 146 ; "" -> null */
-  function parseLatency(str) {
-    if (str === null || str === undefined || str === '') return null;
-    var n = parseFloat(String(str));
-    return isNaN(n) ? null : Math.round(n);
+  function chipClassForStatus(status) {
+    if (!status) return '';
+    if (status === 'connected' || status === 'running' || status === 'ok' || status === 'charging') return 'ok';
+    if (status === 'warning' || status === 'discharging' || status === 'low' || status === 'warn') return 'warn';
+    if (status === 'error' || status === 'disconnected' || status === 'critical' || status === 'err') return 'err';
+    return '';
   }
 
-  /* RSSI dBm -> 0..4 batang */
-  function wifiBars(rssi) {
-    if (typeof rssi !== 'number' || isNaN(rssi)) return 0;
-    if (rssi >= -55) return 4;
-    if (rssi >= -65) return 3;
-    if (rssi >= -75) return 2;
-    return 1;
-  }
+  // ===== WebSocket client (fallback if native WS not used) =====
+  let ws = null;
+  let wsReconnectTimer = null;
+  let wsListeners = new Set();
+  let currentWsUrl = null;
 
-  /* ---------- nama, baterai, aplikasi aktif ---------- */
-
-  /* Nama tampil: hostname dari router lebih diutamakan, lalu nama target, lalu IP. */
-  function displayName(dev) {
-    var h = dev && typeof dev.hostname === 'string' ? dev.hostname.trim() : '';
-    if (h) return h;
-    var n = dev && typeof dev.nama === 'string' ? dev.nama.trim() : '';
-    return n || (dev && dev.ip) || '';
-  }
-
-  /* Nama target ditampilkan sebagai keterangan bila berbeda dari nama tampil. */
-  function altName(dev) {
-    var d = displayName(dev);
-    var n = dev && typeof dev.nama === 'string' ? dev.nama.trim() : '';
-    return n && n !== d ? n : '';
-  }
-
-  var CHARGE_SOURCE = { ac: 'Charger (AC)', usb: 'USB', wireless: 'Nirkabel' };
-  function chargeSourceText(src) { return CHARGE_SOURCE[src] || ''; }
-
-  function isCharging(dev) { return !!(dev && dev.adb && dev.adb.status === 'connected' && dev.adb.charging === true); }
-
-  function formatTemp(c) {
-    if (typeof c !== 'number' || isNaN(c)) return '—';
-    return c.toFixed(1) + ' °C';
-  }
-  /* 'ok' < 42 °C, 'warm' 42–44.9, 'hot' >= 45 */
-  function tempLevel(c) {
-    if (typeof c !== 'number' || isNaN(c)) return '';
-    if (c >= 45) return 'hot';
-    if (c >= 42) return 'warm';
-    return 'ok';
-  }
-
-  function formatVoltage(mv) {
-    if (typeof mv !== 'number' || isNaN(mv)) return '—';
-    return (Math.round(mv / 10) / 100).toFixed(2) + ' V';
-  }
-
-  /* Konvensi router: positif = mengisi, negatif = dipakai. */
-  function formatCurrent(ma) {
-    if (typeof ma !== 'number' || isNaN(ma)) return '—';
-    var abs = Math.abs(Math.round(ma));
-    return (ma > 0 ? '+' : (ma < 0 ? '−' : '')) + abs + ' mA';
-  }
-
-  function formatDrain(pctPerHour) {
-    if (typeof pctPerHour !== 'number' || isNaN(pctPerHour)) return '—';
-    return pctPerHour.toFixed(1) + ' %/jam';
-  }
-
-  /* Perkiraan sisa waktu dari rata-rata pemakaian: "±6 jam 30 mnt" */
-  function estimateRemaining(level, pctPerHour) {
-    var lv = Number(level);
-    if (isNaN(lv) || typeof pctPerHour !== 'number' || pctPerHour <= 0.05) return null;
-    var mins = Math.round(lv / pctPerHour * 60);
-    if (mins > 99 * 60) return null;
-    var h = Math.floor(mins / 60), m = mins % 60;
-    return '±' + (h > 0 ? h + ' jam ' : '') + m + ' mnt';
-  }
-
-  /* Pemakaian RAM dari objek detail.ram ({total_kb, available_kb}); null bila data tak valid. */
-  function ramUsage(ram) {
-    if (!ram) return null;
-    var total = Number(ram.total_kb), avail = Number(ram.available_kb);
-    if (!(total > 0) || isNaN(avail)) return null;
-    var free = Math.min(Math.max(avail, 0), total);
-    var used = total - free;
-    return { usedKb: used, freeKb: free, totalKb: total, pct: Math.round(used / total * 100) };
-  }
-
-  /* foreground_app bisa ada di adb.* (cache) atau detail.* (live). Hasil: {text, pkg} atau null. */
-  function foregroundApp(dev) {
-    var fa = null;
-    if (dev && dev.detail && dev.detail.foreground_app) fa = dev.detail.foreground_app;
-    else if (dev && dev.adb && dev.adb.foreground_app) fa = dev.adb.foreground_app;
-    if (!fa || (!fa.package && !fa.label)) return null;
-    return { text: fa.label || fa.package, pkg: fa.package || null };
-  }
-
-  /* ---------- kecepatan dari selisih sampel rx/tx ---------- */
-
-  function computeRate(prev, cur) {
-    if (!prev || !cur) return null;
-    var dt = cur.ts - prev.ts;
-    if (dt <= 0) return null;
-    var drx = cur.rx - prev.rx;
-    var dtx = cur.tx - prev.tx;
-    if (drx < 0 || dtx < 0) return null; // counter reset (HP reboot)
-    return { rx: drx / dt, tx: dtx / dt };
-  }
-
-  /* store[ip] = {prev, cur, rate}. Sampel baru hanya dihitung kalau rxtx_ts berubah. */
-  function updateSample(store, dev) {
-    var s = store[dev.ip] || (store[dev.ip] = { prev: null, cur: null, rate: null });
-    if (!dev.rxtx_available || dev.rx_bytes == null || dev.tx_bytes == null || dev.rxtx_ts == null) {
-      s.prev = null; s.cur = null; s.rate = null;
-      return null;
+  function wsConnect(url) {
+    if (!url) return;
+    currentWsUrl = url;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    try {
+      ws = new WebSocket(url);
+      ws.onopen = () => { wsListeners.forEach(cb => cb({ type: 'open' })); };
+      ws.onmessage = (e) => { wsListeners.forEach(cb => cb({ type: 'message', data: e.data })); };
+      ws.onerror = (e) => { wsListeners.forEach(cb => cb({ type: 'error', error: e })); };
+      ws.onclose = () => { wsListeners.forEach(cb => cb({ type: 'close' })); scheduleReconnect(); };
+    } catch (e) {
+      wsListeners.forEach(cb => cb({ type: 'error', error: e }));
+      scheduleReconnect();
     }
-    var sample = { rx: dev.rx_bytes, tx: dev.tx_bytes, ts: dev.rxtx_ts };
-    if (s.cur && s.cur.ts === sample.ts) return s.rate;
-    s.prev = s.cur;
-    s.cur = sample;
-    s.rate = computeRate(s.prev, s.cur);
-    return s.rate;
   }
 
-
-  /* ---------- mode Live: hitung dari counter mentah /live ---------- */
-
-  function createLiveState() {
-    return { prev: null, base: null, est: null, estAt: 0, seq: 0 };
+  function scheduleReconnect() {
+    if (wsReconnectTimer) return;
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectTimer = null;
+      if (currentWsUrl) wsConnect(currentWsUrl);
+    }, 3000);
   }
 
-  function _num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
-
-  /* Satu sampel /live -> nilai siap tampil. Selisih dihitung terhadap sampel sebelumnya pada `st`
-   * (dibuat createLiveState). Waktu antar-sampel diambil dari uptime HP (bukan jam router/jaringan),
-   * jadi jitter jaringan tidak mengubah angka. Mengembalikan null untuk nilai yang belum bisa dihitung
-   * (sampel pertama, HP reboot, selisih tak masuk akal) -- bukan 0. */
-  function liveStep(st, s) {
-    var prev = st.prev;
-    st.prev = s;
-    var out = { cpu: null, ram: null, rx: null, tx: null, ping: _num(s.ping_ms), battery: s.battery || null, current: null, slow: s.slow || null };
-
-    var ram = s.ram ? ramUsage(s.ram) : null;
-    out.ram = ram;
-
-    var dt = null;
-    if (prev && _num(s.up) !== null && _num(prev.up) !== null) {
-      dt = s.up - prev.up;
-      if (!(dt > 0 && dt <= 30)) dt = null; // reboot / sampel terlalu jauh
-    }
-    if (dt !== null && s.cpu && prev.cpu) {
-      var dT = s.cpu.total - prev.cpu.total, dI = s.cpu.idle - prev.cpu.idle;
-      if (dT > 0 && dI >= 0 && dI <= dT) out.cpu = Math.round((1 - dI / dT) * 1000) / 10;
-    }
-    if (dt !== null && s.net && prev.net && _num(s.net.rx) !== null && _num(prev.net.rx) !== null) {
-      var drx = s.net.rx - prev.net.rx, dtx = s.net.tx - prev.net.tx;
-      if (drx >= 0 && dtx >= 0) { out.rx = drx / dt; out.tx = dtx / dt; }
-    }
-
-    // Arus: sysfs bila ada. Kalau tidak, perkiraan dari selisih charge counter (uAh); baterai
-    // Android mengubah counter ini hanya sesekali, jadi nilai terakhir dipertahankan sampai counter
-    // berubah lagi (maks 3 menit). Terakhir, nilai cache router.
-    var cur = s.current || {};
-    if (_num(cur.ma) !== null) {
-      out.current = { ma: cur.ma, source: 'sysfs' };
-    } else {
-      var cc = s.battery ? _num(s.battery.charge_counter_uah) : null;
-      if (cc !== null && _num(s.up) !== null) {
-        if (!st.base || s.up < st.base.up) {
-          st.base = { cc: cc, up: s.up }; st.est = null;
-        } else if (cc !== st.base.cc) {
-          var d = s.up - st.base.up;
-          if (d >= 10 && d <= 1800) {
-            var v = (cc - st.base.cc) * 3.6 / d;
-            if (Math.abs(v) >= 1) { st.est = v; st.estAt = s.up; }
-          }
-          st.base = { cc: cc, up: s.up };
-        }
-      }
-      if (st.est !== null && s.up - st.estAt <= 180) out.current = { ma: st.est, source: 'estimate' };
-      else if (_num(cur.cache_ma) !== null) out.current = { ma: cur.cache_ma, source: cur.cache_source || 'cache' };
-    }
-    return out;
+  function wsDisconnect() {
+    currentWsUrl = null;
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    if (ws) { try { ws.close(); } catch (_) {} ws = null; }
   }
 
-  /* Persen -> tingkat warna gauge: 'ok' < 60, 'warm' 60–84, 'hot' >= 85. */
-  function loadLevel(pct) {
-    if (typeof pct !== 'number' || isNaN(pct)) return '';
-    return pct >= 85 ? 'hot' : (pct >= 60 ? 'warm' : 'ok');
-  }
+  function wsOn(listener) { wsListeners.add(listener); return () => wsListeners.delete(listener); }
+  function wsSend(data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data)); }
 
-  /* ms -> "2j 15m" / "15m" / "<1m"; null/0 -> null (biar pemanggil tampilkan "—"). */
-  function formatDuration(ms) {
-    if (typeof ms !== 'number' || isNaN(ms) || ms < 0) return null;
-    var m = Math.round(ms / 60000);
-    if (m < 1) return '<1m';
-    var h = Math.floor(m / 60);
-    m = m % 60;
-    return h > 0 ? (h + 'j ' + m + 'm') : (m + 'm');
-  }
-
-  /* ---------- klien API ---------- */
-
-  function ApiError(kind, message, status, code) {
-    this.name = 'ApiError';
-    this.kind = kind;       // 'config' | 'network' | 'auth' | 'http'
-    this.message = message;
-    this.status = status || 0;
-    this.code = code || null;
-  }
-  ApiError.prototype = Object.create(Error.prototype);
-  ApiError.prototype.constructor = ApiError;
-
-  var ERROR_TEXT = {
-    unauthorized: 'Token salah atau belum diisi.',
-    not_found: 'Data tidak ditemukan di router.',
-    invalid_ip: 'Format IP tidak valid.',
-    invalid_port: 'Port ADB tidak valid (1–65535).',
-    invalid_json: 'Permintaan tidak dapat dibaca router.',
-    ip_duplicate: 'IP ini sudah terdaftar.',
-    method_not_allowed: 'Metode tidak didukung router.',
-    detail_requires_ip: 'Detail butuh IP perangkat.',
-    adb_not_connected: 'ADB belum terhubung ke HP ini.',
-    screencap_timeout: 'HP tidak merespons tangkapan layar tepat waktu. Coba lagi atau bangunkan layarnya dulu.',
-    empty_capture: 'Tangkapan layar kosong. Coba lagi.',
-    encode_failed: 'Gagal memproses hasil tangkapan layar di router.',
-    adb_timeout: 'HP tidak merespons tepat waktu (ADB lambat atau layar HP tidur dalam).',
-    busy: 'Sampel sebelumnya masih berjalan.',
-    helper_not_installed: 'Aplikasi pendamping belum terpasang di HP ini.',
-    location_timeout: 'HP tidak kunjung memberi lokasi (GPS/jaringan lokasi mungkin mati).',
-    location_permission_denied: 'Izin lokasi belum diberikan ke aplikasi pendamping di HP ini.',
-    location_disabled: 'GPS dan lokasi jaringan mati di HP ini.',
-    location_unknown: 'Gagal membaca lokasi dari HP ini.',
-    usage_timeout: 'HP tidak kunjung membalas permintaan data pemakaian.',
-    usage_access_denied: 'Izin akses riwayat pemakaian belum diberikan ke aplikasi pendamping di HP ini.',
-    usage_unknown: 'Gagal membaca data pemakaian dari HP ini.'
-  };
-
-  function errorMessage(err) {
-    if (!err) return 'Terjadi kesalahan.';
-    if (err.kind === 'config') return err.message;
-    if (err.kind === 'network') return 'Router tidak terjangkau (' + (err.message || 'jaringan') + '). Cek WiFi/Tailscale dan URL.';
-    if (err.code && ERROR_TEXT[err.code]) return ERROR_TEXT[err.code];
-    if (err.kind === 'auth') return ERROR_TEXT.unauthorized;
-    return err.message || 'Terjadi kesalahan.';
-  }
-
-  function parseBody(data) {
-    if (typeof data !== 'string') return data;
-    try { return JSON.parse(data); } catch (e) { return data; }
-  }
-
-  /* opts.getSettings() -> { urls: [url1, url2, url3], token, cfkey }
-   * opts.transport(req) -> Promise<{status, data}>   req: {url, method, headers, body, timeout} */
-  function createApi(opts) {
-    var lastGood = ''; // URL yang terakhir berhasil: dicoba lebih dulu agar tidak menunggu URL mati satu per satu
-
-    function request(method, path, body, timeoutMs) {
-      var st = opts.getSettings();
-      var bases = (st.urls || []).map(normalizeBaseUrl).filter(Boolean)
-        .filter(function (b, i, arr) { return arr.indexOf(b) === i; });
-      if (!bases.length) return Promise.reject(new ApiError('config', 'URL API belum diatur.'));
-      if (lastGood && bases.indexOf(lastGood) > 0) {
-        bases = [lastGood].concat(bases.filter(function (b) { return b !== lastGood; }));
-      }
-      if (!st.token) return Promise.reject(new ApiError('config', 'Token belum diatur.'));
-
-      var baseHeaders = { 'Authorization': 'Bearer ' + st.token, 'Accept': 'application/json' };
-      if (body !== undefined) baseHeaders['Content-Type'] = 'application/json';
-      var cfUrl = normalizeBaseUrl(st.urls && st.urls[2]);
-      var cfKey = st.cfkey && st.cfkey.trim() ? st.cfkey : '';
-      // Header kunci hanya untuk request yang menuju URL ke-3 (Cloudflare).
-      function headersFor(base) {
-        if (!cfKey || !cfUrl || base !== cfUrl) return baseHeaders;
-        var h = {};
-        Object.keys(baseHeaders).forEach(function (k) { h[k] = baseHeaders[k]; });
-        h['X-Adbwifi-Key'] = cfKey;
-        return h;
-      }
-
-      var lastErr = null;
-      var chain = Promise.resolve();
-      var result = null;
-
-      bases.forEach(function (base) {
-        chain = chain.then(function () {
-          if (result) return;
-          return Promise.resolve()
-            .then(function () {
-              return opts.transport({ url: base + path, method: method, headers: headersFor(base), body: body, timeout: timeoutMs });
-            })
-            .then(function (res) {
-              var data = parseBody(res.data);
-              if (res.status >= 200 && res.status < 300) { result = { data: data, base: base }; lastGood = base; return; }
-              // Router menjawab (walau galat HTTP): URL ini terjangkau.
-              lastGood = base;
-              var code = data && typeof data === 'object' ? data.error : null;
-              // Kesalahan HTTP berarti router menjawab: jangan coba URL cadangan.
-              throw new ApiError(res.status === 401 ? 'auth' : 'http', code || ('HTTP ' + res.status), res.status, code);
-            })
-            .catch(function (e) {
-              if (e instanceof ApiError && e.kind !== 'network') throw e;
-              lastErr = (e instanceof ApiError) ? e : new ApiError('network', (e && e.message) || 'gagal terhubung');
-            });
-        });
-      });
-
-      return chain.then(function () {
-        if (result) return result;
-        throw lastErr || new ApiError('network', 'gagal terhubung');
-      });
-    }
-
-    return {
-      request: request,
-      status: function () {
-        return request('GET', '/status', undefined, 15000).then(function (r) {
-          var d = r.data || {};
-          return { timestamp: d.timestamp || null, devices: Array.isArray(d.devices) ? d.devices : [], base: r.base };
-        });
-      },
-      detail: function (ip) {
-        return request('GET', '/status?ip=' + encodeURIComponent(ip) + '&detail=1', undefined, 20000)
-          .then(function (r) { return r.data; });
-      },
-      refreshIp: function (ip) {
-        return request('POST', '/refresh', { ip: ip }, 20000).then(function (r) { return r.data; });
-      },
-      /* Screenshot HP bisa butuh puluhan detik di HP tertentu (terukur ~89 dtk di satu unit);
-       * timeout digenerosikan jauh di atas itu supaya tidak dipotong sebelum router sendiri menyerah. */
-      screenshot: function (ip) {
-        return request('GET', '/screenshot?ip=' + encodeURIComponent(ip), undefined, 130000)
-          .then(function (r) { return r.data; });
-      },
-      /* dumpsys meminfo di dalamnya terukur bisa ~8 dtk secara alami di sebagian HP
-       * (budget server 20 dtk untuk panggilan itu saja); timeout klien diberi marjin. */
-      optimize: function (ip) {
-        return request('GET', '/optimize?ip=' + encodeURIComponent(ip), undefined, 40000)
-          .then(function (r) { return r.data; });
-      },
-      /* Satu sampel ringan untuk mode Live. full=true menambah bagian lambat (layar, WiFi, aplikasi aktif). */
-      live: function (ip, full) {
-        return request('GET', '/live?ip=' + encodeURIComponent(ip) + (full ? '&full=1' : ''), undefined, 9000)
-          .then(function (r) { return r.data; });
-      },
-      /* Satu titik lokasi on-demand (budget router ~20 dtk: menunggu fix GPS/jaringan). */
-      location: function (ip) {
-        return request('GET', '/location?ip=' + encodeURIComponent(ip), undefined, 25000)
-          .then(function (r) { return r.data; });
-      },
-      /* Ringkasan pemakaian hari ini (cepat: query lokal di HP). */
-      usage: function (ip) {
-        return request('GET', '/usage?ip=' + encodeURIComponent(ip), undefined, 12000)
-          .then(function (r) { return r.data; });
-      },
-      targets: function () {
-        return request('GET', '/targets', undefined, 15000).then(function (r) { return r.data; });
-      },
-      addTarget: function (t) {
-        return request('POST', '/targets/add', { ip: t.ip, nama: t.nama, port_adb: Number(t.port_adb) }, 15000)
-          .then(function (r) { return r.data; });
-      },
-      deleteTarget: function (ip) {
-        return request('POST', '/targets/delete', { ip: ip }, 15000).then(function (r) { return r.data; });
-      }
-    };
-  }
-
-  /* Transport fetch (browser / Node). Di aplikasi native dipakai CapacitorHttp (lihat app.js). */
-  function fetchTransport(req) {
-    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, req.timeout || 15000) : null;
-    return fetch(req.url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
-      signal: ctrl ? ctrl.signal : undefined
-    }).then(function (res) {
-      return res.text().then(function (t) { return { status: res.status, data: t }; });
-    }).then(function (out) { clearTimeout(timer); return out; },
-      function (e) { clearTimeout(timer); throw (e && e.name === 'AbortError') ? new Error('waktu habis') : e; });
-  }
-
+  // ===== Export =====
   return {
-    DEFAULT_PATH: DEFAULT_PATH,
-    isValidIPv4: isValidIPv4,
-    isValidPort: isValidPort,
-    normalizeBaseUrl: normalizeBaseUrl,
-    escapeHtml: escapeHtml,
-    formatBytes: formatBytes,
-    formatRate: formatRate,
-    formatUptime: formatUptime,
-    formatAge: formatAge,
-    parseLatency: parseLatency,
-    wifiBars: wifiBars,
-    displayName: displayName,
-    altName: altName,
-    chargeSourceText: chargeSourceText,
-    isCharging: isCharging,
-    formatTemp: formatTemp,
-    tempLevel: tempLevel,
-    formatVoltage: formatVoltage,
-    formatCurrent: formatCurrent,
-    formatDrain: formatDrain,
-    estimateRemaining: estimateRemaining,
-    ramUsage: ramUsage,
-    foregroundApp: foregroundApp,
-    computeRate: computeRate,
-    updateSample: updateSample,
-    createLiveState: createLiveState,
-    liveStep: liveStep,
-    loadLevel: loadLevel,
-    formatDuration: formatDuration,
-    ApiError: ApiError,
-    errorMessage: errorMessage,
-    createApi: createApi,
-    fetchTransport: fetchTransport
+    $, $$, debounce, throttle, clamp,
+    formatBytes, formatMs, formatUptime, formatSignal, chipClassForStatus,
+    STORAGE, initCapacitor, loadSettings, saveSettings, prefGet, prefSet,
+    nativeStartServer, nativeStopServer, nativeGetServerStatus, nativeGetData, nativeGetWsUrl, nativeRequestPermissions,
+    wsConnect, wsDisconnect, wsOn, wsSend,
   };
-});
+})();
+
+// Expose globally for app.js
+window.TelemetryLib = TelemetryLib;

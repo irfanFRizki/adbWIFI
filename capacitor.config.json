@@ -1,17 +1,30 @@
 {
-  "appId": "com.irfanfrizki.adbwifi",
-  "appName": "ADB WiFi Monitor",
+  "appId": "com.irfanfrizki.telemetry",
+  "appName": "Telemetry Server",
   "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "buildOptions": {
+      "keystorePath": null,
+      "keystorePassword": null,
+      "keystoreAlias": null,
+      "keystoreAliasPassword": null,
+      "releaseType": "APK"
+    },
+    "allowMixedContent": true,
+    "cleartext": true,
+    "loggingBehavior": "debug"
+  },
+  "ios": {
+    "contentInset": "automatic"
+  },
   "server": {
     "androidScheme": "http",
     "cleartext": true
   },
   "plugins": {
-    "CapacitorHttp": {
-      "enabled": true
+    "TelemetryBridge": {
+      "android": "com.irfanfrizki.telemetry.bridge.TelemetryBridgePlugin"
     }
-  },
-  "android": {
-    "allowMixedContent": true
   }
 }
