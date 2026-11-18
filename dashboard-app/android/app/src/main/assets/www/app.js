@@ -15,6 +15,7 @@
   let wsReconnectTimer = null;
   let serverUrl = '';
   let reconnectAttempts = 0;
+  let lastWsError = false;
   const maxReconnect = 12;
 
   // ===== DOM refs =====
@@ -253,29 +254,38 @@
     }
 
     try {
-      ws = new WebSocket(url);
+      const sock = new WebSocket(url);
+      ws = sock;
 
-      ws.onopen = () => {
+      sock.onopen = () => {
+        if (ws !== sock) return;
         setPulse('connected');
         reconnectAttempts = 0;
         showBanner('Terhubung ke server', 'ok');
       };
 
-      ws.onmessage = (e) => {
+      sock.onmessage = (e) => {
+        if (ws !== sock) return;
         try {
           const msg = JSON.parse(e.data);
           render(msg.type === 'telemetry' ? msg.data : msg);
         } catch (_) {}
       };
 
-      ws.onerror = () => {};
+      sock.onerror = () => { lastWsError = true; };
 
-      ws.onclose = () => {
+      sock.onclose = () => {
+        if (ws !== sock) return; // koneksi lama yang sudah diganti
         setPulse('disconnected');
+        if (serverUrl) {
+          const shown = serverUrl.replace(/\?token=.*$/, '');
+          showBanner(`Tidak bisa terhubung ke ${shown}. Pastikan server berjalan, port WebSocket benar, dan satu jaringan. Mencoba lagi...`, 'err');
+        }
         scheduleReconnect();
       };
-    } catch (_) {
+    } catch (err) {
       setPulse('disconnected');
+      showBanner(`URL tidak valid: ${err && err.message ? err.message : err}`, 'err');
       scheduleReconnect();
     }
   }
@@ -306,9 +316,9 @@
   function loadSettings() {
     try {
       const saved = localStorage.getItem('dashboard_settings');
-      if (saved) return JSON.parse(saved);
+      if (saved) { const o = JSON.parse(saved); return { serverIp: o.serverIp || '', wsPort: o.wsPort || '8765', token: o.token || '' }; }
     } catch (_) {}
-    return { serverIp: '', port: '8080', token: '' };
+    return { serverIp: '', wsPort: '8765', token: '' };
   }
 
   function saveSettings(s) {
@@ -318,7 +328,7 @@
   function populateSettings() {
     const s = loadSettings();
     if (els.setServerIp) els.setServerIp.value = s.serverIp || '';
-    if (els.setPort) els.setPort.value = s.port || '8080';
+    if (els.setPort) els.setPort.value = s.wsPort || '8765';
     if (els.setToken) els.setToken.value = s.token || '';
     if (els.verLabel) els.verLabel.textContent = `v${window.APP_VERSION || '2.0.0'} • ${window.APP_ID || 'com.irfanfrizki.telemetry.dashboard'}`;
   }
@@ -332,16 +342,17 @@
 
   function onConnect() {
     const ip = els.setServerIp ? els.setServerIp.value.trim() : '';
-    const port = els.setPort ? els.setPort.value.trim() : '8080';
+    const port = els.setPort ? els.setPort.value.trim() : '8765';
     const token = els.setToken ? els.setToken.value.trim() : '';
 
     if (!ip) { showToast('IP server wajib diisi', true); return; }
     const p = parseInt(port, 10);
     if (isNaN(p) || p < 1 || p > 65535) { showToast('Port tidak valid', true); return; }
 
-    saveSettings({ serverIp: ip, port: String(p), token });
+    saveSettings({ serverIp: ip, wsPort: String(p), token });
 
     wsDisconnect();
+    showBanner(`Menghubungkan ke ${ip}:${p} ...`, 'warn');
     wsConnect(buildWsUrl(ip, p, token));
     closeLayer(els.layerSettings);
   }
@@ -353,7 +364,7 @@
       try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
     } else {
       const s = loadSettings();
-      const url = buildWsUrl(s.serverIp, s.port, s.token);
+      const url = buildWsUrl(s.serverIp, s.wsPort, s.token);
       if (url) wsConnect(url); else { populateSettings(); openLayer(els.layerSettings); }
     }
   });
@@ -383,7 +394,7 @@
     populateSettings();
     const s = loadSettings();
     if (s.serverIp) {
-      const url = buildWsUrl(s.serverIp, s.port, s.token);
+      const url = buildWsUrl(s.serverIp, s.wsPort, s.token);
       if (url) wsConnect(url);
     } else {
       openLayer(els.layerSettings);

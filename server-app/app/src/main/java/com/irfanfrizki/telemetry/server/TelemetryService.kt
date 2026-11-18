@@ -293,7 +293,14 @@ class TelemetryService : Service() {
         private fun authenticated(handshake: ClientHandshake): Boolean {
             if (token.isEmpty()) return true
             val auth = handshake.getFieldValue("Authorization") ?: ""
-            return auth.startsWith("Bearer ") && auth.substring(7) == token
+            if (auth.startsWith("Bearer ") && auth.substring(7) == token) return true
+            // Browsers/WebView cannot set headers on WebSocket: accept ?token=... in the URL
+            val query = handshake.resourceDescriptor?.substringAfter('?', "") ?: ""
+            val tokenParam = query.split('&')
+                .firstOrNull { it.startsWith("token=") }
+                ?.substringAfter("token=")
+                ?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: ""
+            return tokenParam == token
         }
 
         private fun jsonResponse(status: Response.IStatus, body: String): Response =
