@@ -121,7 +121,7 @@ class MainActivity : AppCompatActivity() {
         val url = tvWsUrl.text.toString()
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         val clip = android.content.ClipData.newPlainText("ws_url", url)
-        clipboard.primaryClip = clip
+        clipboard.setPrimaryClip(clip)
         Toast.makeText(this, getString(R.string.copied), Toast.LENGTH_SHORT).show()
     }
 
