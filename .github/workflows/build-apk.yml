@@ -57,7 +57,7 @@ jobs:
 
       - name: Accept all Android SDK licenses
         run: |
-          yes | sdkmanager --licenses >/dev/null
+          yes | sdkmanager --licenses || true
         shell: bash
 
       - name: Install required Android SDK packages
