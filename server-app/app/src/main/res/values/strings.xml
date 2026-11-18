@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">Telemetry Server</string>
+    <string name="server_running">Server Running</string>
+    <string name="server_stopped">Server Stopped</string>
+    <string name="start_server">Start Server</string>
+    <string name="stop_server">Stop Server</string>
+    <string name="settings">Settings</string>
+    <string name="port">HTTP Port</string>
+    <string name="ws_port">WebSocket Port</string>
+    <string name="token">Auth Token (optional)</string>
+    <string name="interval">Update Interval (seconds)</string>
+    <string name="bind_all">Bind to All Interfaces</string>
+    <string name="save">Save</string>
+    <string name="status">Status</string>
+    <string name="local_ip">Local IP</string>
+    <string name="ws_url">WebSocket URL</string>
+    <string name="copy">Copy</string>
+    <string name="copied">Copied to clipboard</string>
+    <string name="saved">Saved</string>
+    <string name="server_started">Server started on %1$s:%2$d</string>
+    <string name="server_stopped_msg">Server stopped</string>
+    <string name="invalid_config">Invalid configuration</string>
+    <string name="permissions_needed">Location and Usage Stats permissions required</string>
+</resources>

@@ -1,6 +1,11 @@
-# Telemetry Server
+# Telemetry Server & Dashboard
 
-Android Telemetry Server — expose sensor data via local HTTP + WebSocket server. No ADB, no root, no router configuration required.
+Two APKs for remote Android monitoring:
+
+- **TelemetryServer (APK 1)** — Install on **HP Target** (device to be monitored). Runs foreground service with HTTP + WebSocket server, collects sensor data.
+- **TelemetryDashboard (APK 2)** — Install on **HP Pantau** (monitoring device). WebView dashboard that connects to Server APK via WebSocket.
+
+No ADB, no root, no router configuration required.
 
 ## Features
 
@@ -10,9 +15,11 @@ Android Telemetry Server — expose sensor data via local HTTP + WebSocket serve
 - **Visual Dashboard** — Dark/light theme, live cards for each metric
 - **Token Auth** — Bearer token or query param `?token=`
 - **Auto-start on Boot** — Starts automatically after device reboot
-- **Three URL Fallback** — LAN IP, Tailscale, Cloudflare Tunnel (configured in app)
+- **Tailscale / LAN / VPN support** — Works across networks
 
-## API Endpoints
+## APK 1: TelemetryServer (HP Target)
+
+### API Endpoints
 
 | Endpoint | Description |
 |----------|-------------|
@@ -25,7 +32,7 @@ Android Telemetry Server — expose sensor data via local HTTP + WebSocket serve
 | `GET /status` | Server health check |
 | `WS /ws/live` | Real-time telemetry push |
 
-## WebSocket Protocol
+### WebSocket Protocol
 
 ```json
 // Client → Server
@@ -37,49 +44,74 @@ Android Telemetry Server — expose sensor data via local HTTP + WebSocket serve
 {"type": "pong", "ts": 1234567890}
 ```
 
-## Requirements
+### Permissions Required
 
-- Android 8.0+ (API 26)
-- Location permission (for GPS + WiFi SSID)
-- Usage Stats permission (for app list)
-- Notification permission (Android 13+)
+- Location (GPS + WiFi SSID)
+- Usage Stats (app list)
+- Notification (Android 13+)
+- Foreground Service Data Sync
+
+## APK 2: TelemetryDashboard (HP Pantau)
+
+- Pure WebView app — no native sensor access
+- Connects to Server via `ws://IP_SERVER:PORT/ws`
+- Settings: Server IP, HTTP Port, Bearer Token
+- Auto-reconnect with exponential backoff
+- Works over LAN, Tailscale, VPN
 
 ## Build
 
+### GitHub Actions (Recommended)
+
+Push a tag `v*` to trigger automated build for both APKs:
+
 ```bash
-npm ci
-npx cap add android
-npx cap sync android
-cd android && ./gradlew assembleRelease
+git tag -a v2.0.0 -m "v2.0.0 - Two APK architecture"
+git push origin v2.0.0
 ```
 
-## GitHub Actions
+Release artifacts:
+- `TelemetryServer-vX.Y.Z.apk` — HP Target
+- `TelemetryDashboard-vX.Y.Z.apk` — HP Pantau
 
-Push a tag `v*` to trigger automated build and release.
+### Local Build (requires Gradle 8.9+, JDK 21)
 
-## Security
+```bash
+# Server APK
+cd server-app && gradle assembleRelease
 
-- Token stored in Android Keystore-backed Preferences
-- Cleartext HTTP allowed for LAN (Capacitor `cleartext: true`)
-- No external dependencies — fully local
+# Dashboard APK
+cd dashboard-app/android && gradle assembleRelease
+```
+
+APKs output:
+- `server-app/app/build/outputs/apk/release/app-release-unsigned.apk`
+- `dashboard-app/android/app/build/outputs/apk/release/app-release-unsigned.apk`
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│        Capacitor Web App (www/)     │
-│   Dashboard UI + Settings + Config  │
-└───────────────┬─────────────────────┘
-                │ Capacitor Bridge (TelemetryBridge)
-                ▼
-┌─────────────────────────────────────┐
-│      Kotlin Foreground Service      │
-│  ┌──────────────┐  ┌─────────────┐  │
-│  │ NanoWSD HTTP │  │ DataCollector│ │
-│  │ + WebSocket  │  │ (Sensors)   │  │
-│  └──────────────┘  └─────────────┘  │
-└─────────────────────────────────────┘
+┌─────────────────────────────┐         WebSocket (ws://IP:PORT/ws)         ┌─────────────────────────────┐
+│        HP TARGET            │  ◄──────────────────────────────────────►  │       HP PANTAU             │
+│  ┌───────────────────────┐  │                                           │  ┌───────────────────────┐  │
+│  │  TelemetryServer APK  │  │  Real-time telemetry push every N sec    │  │  TelemetryDashboard   │  │
+│  │  ┌─────────────────┐  │  │  HTTP API for instant data                │  │  APK (WebView)        │  │
+│  │  │ Foreground Svc  │  │  │  Token auth (Bearer / ?token=)            │  │  ┌─────────────────┐  │
+│  │  │  ┌───────────┐  │  │  │                                           │  │  │ WebView + JS    │  │
+│  │  │  │ NanoHTTPD │  │  │  │                                           │  │  │ Dashboard UI    │  │
+│  │  │  │ + WS      │  │  │  │                                           │  │  └─────────────────┘  │  │
+│  │  │  │ DataColl  │  │  │  │                                           │  └───────────────────────┘  │
+│  │  │  └───────────┘  │  │  │                                           └─────────────────────────────┘
+│  │  └─────────────────┘  │  │
+│  └───────────────────────┘  │
+└─────────────────────────────┘
 ```
+
+## Security
+
+- Token stored in Android SharedPreferences (Keystore-backed on supported devices)
+- Cleartext HTTP/WS allowed for LAN/VPN
+- No external dependencies — fully local communication
 
 ## License
 

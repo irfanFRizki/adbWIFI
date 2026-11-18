@@ -1,0 +1,2 @@
+rootProject.name = 'TelemetryServer'
+include ':app'

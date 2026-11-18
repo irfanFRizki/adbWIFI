@@ -1,0 +1,394 @@
+/**
+ * Telemetry Dashboard — remote monitoring client.
+ * Connects to Telemetry Server (APK 1) via WebSocket. No native bridge needed.
+ */
+
+(() => {
+  'use strict';
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  // ===== State =====
+  let ws = null;
+  let wsReconnectTimer = null;
+  let serverUrl = '';
+  let reconnectAttempts = 0;
+  const maxReconnect = 12;
+
+  // ===== DOM refs =====
+  const els = {
+    pulse: $('#pulse'),
+    banner: $('#banner'),
+    btnSettings: $('#btnSettings'),
+    btnRefresh: $('#btnRefresh'),
+
+    chipBatStatus: $('#chipBatStatus'),
+    valBatLevel: $('#valBatLevel'),
+    valBatTemp: $('#valBatTemp'),
+    valBatVolt: $('#valBatVolt'),
+    valBatCurr: $('#valBatCurr'),
+    barBat: $('#barBat'),
+    footBat: $('#footBat'),
+
+    chipLoc: $('#chipLoc'),
+    valLat: $('#valLat'),
+    valLon: $('#valLon'),
+    valAcc: $('#valAcc'),
+    valAlt: $('#valAlt'),
+    valProv: $('#valProv'),
+    footLoc: $('#footLoc'),
+
+    chipSys: $('#chipSys'),
+    valRam: $('#valRam'),
+    valCpu: $('#valCpu'),
+    valScreen: $('#valScreen'),
+    barRam: $('#barRam'),
+    barCpu: $('#barCpu'),
+    footSys: $('#footSys'),
+
+    chipNet: $('#chipNet'),
+    valWifi: $('#valWifi'),
+    valIp: $('#valIp'),
+    valRssi: $('#valRssi'),
+    footNet: $('#footNet'),
+
+    chipApps: $('#chipApps'),
+    listApps: $('#listApps'),
+    footApps: $('#footApps'),
+
+    rawJson: $('#rawJson'),
+    btnCopyJson: $('#btnCopyJson'),
+
+    layerSettings: $('#layerSettings'),
+    formSettings: $('#formSettings'),
+    verLabel: $('#verLabel'),
+    setServerIp: $('#setServerIp'),
+    setPort: $('#setPort'),
+    setToken: $('#setToken'),
+    setMsg: $('#setMsg'),
+    tokenToggle: $('#tokenToggle'),
+
+    layerDetail: $('#layerDetail'),
+    dTitle: $('#dTitle'),
+    dSub: $('#dSub'),
+    dBody: $('#dBody'),
+
+    toast: $('#toast'),
+  };
+
+  // ===== Helpers =====
+  function showBanner(msg, type = 'info') {
+    if (!els.banner) return;
+    els.banner.textContent = msg;
+    els.banner.className = `banner ${type}`;
+    els.banner.classList.remove('hidden');
+    setTimeout(() => els.banner.classList.add('hidden'), 4000);
+  }
+
+  function showToast(msg, err = false) {
+    if (!els.toast) return;
+    els.toast.textContent = msg;
+    els.toast.className = `toast ${err ? 'err' : ''}`;
+    els.toast.classList.remove('hidden');
+    setTimeout(() => els.toast.classList.add('hidden'), 3000);
+  }
+
+  function openLayer(layer) { if (!layer) return; layer.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
+  function closeLayer(layer) { if (!layer) return; layer.classList.add('hidden'); document.body.style.overflow = ''; }
+
+  function setChip(el, text, status) {
+    if (!el) return;
+    el.textContent = text || '—';
+    el.className = `chip ${status || ''}`;
+  }
+
+  function setPulse(state) {
+    if (!els.pulse) return;
+    els.pulse.className = `pulse ${state}`;
+  }
+
+  // ===== Formatting =====
+  function formatBytes(bytes) {
+    if (bytes === null || bytes === undefined || isNaN(bytes)) return '—';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    let v = Number(bytes);
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
+  }
+
+  function formatMs(ms) {
+    if (!ms || ms < 0) return '—';
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    if (h > 0) return `${h}j ${m % 60}m`;
+    if (m > 0) return `${m}m ${s % 60}d`;
+    return `${s}d`;
+  }
+
+  function formatUptime(ms) {
+    if (!ms || ms < 0) return '—';
+    const sec = Math.floor(ms / 1000);
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const parts = [];
+    if (d) parts.push(`${d}h`);
+    if (h) parts.push(`${h}j`);
+    if (m) parts.push(`${m}m`);
+    if (s || !parts.length) parts.push(`${s}d`);
+    return parts.join(' ');
+  }
+
+  function formatSignal(rssi) {
+    if (rssi === null || rssi === undefined) return '—';
+    if (rssi >= -50) return 'Sangat baik';
+    if (rssi >= -60) return 'Baik';
+    if (rssi >= -70) return 'Cukup';
+    if (rssi >= -80) return 'Lemah';
+    return 'Sangat lemah';
+  }
+
+  // ===== Rendering =====
+  function renderApps(apps) {
+    if (!els.listApps) return;
+    if (!apps || !apps.length) {
+      els.listApps.innerHTML = '';
+      if (els.footApps) els.footApps.textContent = 'Tidak ada aplikasi foreground';
+      return;
+    }
+    els.listApps.innerHTML = apps.map(a => `
+      <li>
+        <span class="app-icon">${(a.name || a.package || '?')[0].toUpperCase()}</span>
+        <div class="app-info">
+          <div class="app-name">${a.name || a.package}</div>
+          <div class="app-pkg">${a.package}</div>
+        </div>
+        <span class="app-time">${a.lastTimeUsed ? formatMs(Date.now() - a.lastTimeUsed) + ' lalu' : '—'}</span>
+      </li>
+    `).join('');
+    if (els.footApps) els.footApps.textContent = `${apps.length} aplikasi`;
+  }
+
+  function render(data) {
+    if (!data) return;
+
+    if (data.battery) {
+      const b = data.battery;
+      const level = b.level ?? 0;
+      const status = b.charging ? 'charging' : (level <= 15 ? 'low' : 'ok');
+      setChip(els.chipBatStatus, b.charging ? 'Mengisi' : 'Discharging', status);
+      if (els.valBatLevel) els.valBatLevel.textContent = level;
+      if (els.barBat) {
+        els.barBat.style.width = `${clamp(level, 0, 100)}%`;
+        els.barBat.className = level <= 15 ? 'low' : (level <= 40 ? 'mid' : '');
+      }
+      if (els.valBatTemp) els.valBatTemp.textContent = b.temp ? `${Number(b.temp).toFixed(1)}°C` : '—';
+      if (els.valBatVolt) els.valBatVolt.textContent = b.voltageMv ? `${(b.voltageMv / 1000).toFixed(2)}V` : '—';
+      if (els.valBatCurr) els.valBatCurr.textContent = b.currentMa ? `${b.currentMa}mA` : '—';
+      if (els.footBat) els.footBat.textContent = `Health: ${b.health || '—'} • Tech: ${b.technology || '—'} • ${new Date(b.timestamp || Date.now()).toLocaleTimeString()}`;
+    }
+
+    if (data.location) {
+      const l = data.location;
+      setChip(els.chipLoc, l.provider || 'GPS', (l.accuracy || 999) <= 20 ? 'ok' : 'warn');
+      if (els.valLat) els.valLat.textContent = l.lat != null ? Number(l.lat).toFixed(6) : '—';
+      if (els.valLon) els.valLon.textContent = l.lon != null ? Number(l.lon).toFixed(6) : '—';
+      if (els.valAcc) els.valAcc.textContent = l.accuracy ? `±${Math.round(l.accuracy)}m` : '—';
+      if (els.valAlt) els.valAlt.textContent = l.altitude ? `${Number(l.altitude).toFixed(1)}m` : '—';
+      if (els.valProv) els.valProv.textContent = l.provider || '—';
+      if (els.footLoc) els.footLoc.textContent = `Speed: ${l.speed ? Number(l.speed).toFixed(1) + ' m/s' : '—'} • ${new Date(l.timestamp || Date.now()).toLocaleTimeString()}`;
+    } else {
+      setChip(els.chipLoc, 'Tidak tersedia', 'err');
+      if (els.valLat) els.valLat.textContent = '—';
+      if (els.valLon) els.valLon.textContent = '—';
+    }
+
+    if (data.system) {
+      const s = data.system;
+      setChip(els.chipSys, s.screenOn ? 'Screen ON' : 'Screen OFF', s.screenOn ? 'ok' : '');
+      const ramUsed = (s.ramTotal || 0) - (s.ramAvail || 0);
+      const ramPct = s.ramTotal ? Math.round((ramUsed / s.ramTotal) * 100) : 0;
+      const cpuPct = Math.round(s.cpuLoad || 0);
+      if (els.valRam) els.valRam.textContent = `${formatBytes(ramUsed)} / ${formatBytes(s.ramTotal)}`;
+      if (els.valCpu) els.valCpu.textContent = `${cpuPct}%`;
+      if (els.valScreen) els.valScreen.textContent = s.screenOn ? 'ON' : 'OFF';
+      if (els.barRam) {
+        els.barRam.style.width = `${clamp(ramPct, 0, 100)}%`;
+        els.barRam.className = ramPct > 85 ? 'low' : (ramPct > 60 ? 'mid' : '');
+      }
+      if (els.barCpu) {
+        els.barCpu.style.width = `${clamp(cpuPct, 0, 100)}%`;
+        els.barCpu.className = cpuPct > 85 ? 'low' : (cpuPct > 60 ? 'mid' : '');
+      }
+      if (els.footSys) els.footSys.textContent = `Model: ${s.model || '—'} • Android: ${s.androidVersion || '—'} • Uptime: ${formatUptime(s.uptime)}`;
+    }
+
+    if (data.network) {
+      const n = data.network;
+      setChip(els.chipNet, n.wifiSsid || 'No WiFi', n.wifiSsid ? 'ok' : 'warn');
+      if (els.valWifi) els.valWifi.textContent = n.wifiSsid || '—';
+      if (els.valIp) els.valIp.textContent = n.ipLocal || '—';
+      if (els.valRssi) els.valRssi.textContent = n.rssi ? `${n.rssi} dBm (${formatSignal(n.rssi)})` : '—';
+      if (els.footNet) els.footNet.textContent = `BSSID: ${n.bssid || '—'} • Public IP: ${n.ipPublic || '—'}`;
+    }
+
+    if (data.apps) renderApps(data.apps);
+
+    if (els.rawJson) els.rawJson.textContent = JSON.stringify(data, null, 2);
+  }
+
+  // ===== WebSocket =====
+  function wsConnect(url) {
+    if (!url) return;
+    serverUrl = url;
+    setPulse('connecting');
+
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      try { ws.close(); } catch (_) {}
+    }
+
+    try {
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        setPulse('connected');
+        reconnectAttempts = 0;
+        showBanner('Terhubung ke server', 'ok');
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          render(msg.type === 'telemetry' ? msg.data : msg);
+        } catch (_) {}
+      };
+
+      ws.onerror = () => {};
+
+      ws.onclose = () => {
+        setPulse('disconnected');
+        scheduleReconnect();
+      };
+    } catch (_) {
+      setPulse('disconnected');
+      scheduleReconnect();
+    }
+  }
+
+  function scheduleReconnect() {
+    if (wsReconnectTimer) return;
+    if (reconnectAttempts >= maxReconnect) {
+      showBanner('Gagal terhubung. Periksa IP server.', 'err');
+      return;
+    }
+    const delay = Math.min(2000 * Math.pow(1.6, reconnectAttempts), 30000);
+    reconnectAttempts++;
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectTimer = null;
+      if (serverUrl) wsConnect(serverUrl);
+    }, delay);
+  }
+
+  function wsDisconnect() {
+    serverUrl = '';
+    reconnectAttempts = 0;
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    if (ws) { try { ws.close(); } catch (_) {} ws = null; }
+    setPulse('disconnected');
+  }
+
+  // ===== Settings =====
+  function loadSettings() {
+    try {
+      const saved = localStorage.getItem('dashboard_settings');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return { serverIp: '', port: '8080', token: '' };
+  }
+
+  function saveSettings(s) {
+    try { localStorage.setItem('dashboard_settings', JSON.stringify(s)); } catch (_) {}
+  }
+
+  function populateSettings() {
+    const s = loadSettings();
+    if (els.setServerIp) els.setServerIp.value = s.serverIp || '';
+    if (els.setPort) els.setPort.value = s.port || '8080';
+    if (els.setToken) els.setToken.value = s.token || '';
+    if (els.verLabel) els.verLabel.textContent = `v${window.APP_VERSION || '2.0.0'} • ${window.APP_ID || 'com.irfanfrizki.telemetry.dashboard'}`;
+  }
+
+  function buildWsUrl(ip, port, token) {
+    if (!ip || !port) return null;
+    let url = `ws://${ip}:${port}/ws`;
+    if (token) url += `?token=${encodeURIComponent(token)}`;
+    return url;
+  }
+
+  function onConnect() {
+    const ip = els.setServerIp ? els.setServerIp.value.trim() : '';
+    const port = els.setPort ? els.setPort.value.trim() : '8080';
+    const token = els.setToken ? els.setToken.value.trim() : '';
+
+    if (!ip) { showToast('IP server wajib diisi', true); return; }
+    const p = parseInt(port, 10);
+    if (isNaN(p) || p < 1 || p > 65535) { showToast('Port tidak valid', true); return; }
+
+    saveSettings({ serverIp: ip, port: String(p), token });
+
+    wsDisconnect();
+    wsConnect(buildWsUrl(ip, p, token));
+    closeLayer(els.layerSettings);
+  }
+
+  // ===== Event bindings =====
+  if (els.btnSettings) els.btnSettings.addEventListener('click', () => { populateSettings(); openLayer(els.layerSettings); });
+  if (els.btnRefresh) els.btnRefresh.addEventListener('click', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+    } else {
+      const s = loadSettings();
+      const url = buildWsUrl(s.serverIp, s.port, s.token);
+      if (url) wsConnect(url); else { populateSettings(); openLayer(els.layerSettings); }
+    }
+  });
+  if (els.formSettings) els.formSettings.addEventListener('submit', (e) => { e.preventDefault(); onConnect(); });
+  if (els.btnCopyJson) els.btnCopyJson.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(els.rawJson ? els.rawJson.textContent : '');
+      showToast('JSON disalin');
+    } catch (_) { showToast('Gagal salin', true); }
+  });
+  if (els.tokenToggle) els.tokenToggle.addEventListener('click', () => {
+    if (!els.setToken) return;
+    const isPwd = els.setToken.type === 'password';
+    els.setToken.type = isPwd ? 'text' : 'password';
+    els.tokenToggle.textContent = isPwd ? 'Sembunyikan' : 'Lihat';
+  });
+
+  $$('[data-close]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const layer = btn.closest('.layer');
+      if (layer) closeLayer(layer);
+    });
+  });
+
+  // ===== Init =====
+  function init() {
+    populateSettings();
+    const s = loadSettings();
+    if (s.serverIp) {
+      const url = buildWsUrl(s.serverIp, s.port, s.token);
+      if (url) wsConnect(url);
+    } else {
+      openLayer(els.layerSettings);
+    }
+  }
+
+  init();
+})();

@@ -1,8 +1,13 @@
 node_modules/
-android/
-helper-app/.gradle/
-helper-app/app/build/
-helper-app/build/
+/helper-app/.gradle/
+/helper-app/app/build/
+/helper-app/build/
+/server-app/.gradle/
+/server-app/app/build/
+/server-app/build/
+/dashboard-app/android/.gradle/
+/dashboard-app/android/app/build/
+/dashboard-app/android/build/
 *.apk
 *.aab
 .DS_Store
