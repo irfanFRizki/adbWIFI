@@ -27,15 +27,14 @@ import android.provider.Settings
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.*
+import java.io.File
+import java.net.Inet4Address
 import java.net.NetworkInterface
-import java.util.*
 import java.util.concurrent.TimeUnit
 
 class DataCollector(private val context: Context) {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager?
-    private val batteryReceiver: BroadcastReceiver? = null
 
     fun collect(): JSONObject {
         return try {
@@ -64,7 +63,7 @@ class DataCollector(private val context: Context) {
         val health = intent?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1) ?: -1
         val tempTenths = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
         val voltageMv = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0) ?: 0
-        val currentUa = intent?.getIntExtra(BatteryManager.EXTRA_CURRENT_NOW, -1) ?: -1
+        val currentMa = readCurrentMa()
         val technology = intent?.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY) ?: "—"
         val plugType = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
 
@@ -91,13 +90,28 @@ class DataCollector(private val context: Context) {
             })
             put("temp", tempTenths / 10.0)
             put("voltageMv", voltageMv)
-            put("currentMa", if (currentUa > 0) currentUa / 1000 else -1)
+            // Signed mA: positive = charging in on most devices, negative = discharging; null if unsupported
+            put("currentMa", currentMa ?: JSONObject.NULL)
             put("technology", technology)
             put("plugType", plugType)
             put("pluggedAc", plugType and BatteryManager.BATTERY_PLUGGED_AC != 0)
             put("pluggedUsb", plugType and BatteryManager.BATTERY_PLUGGED_USB != 0)
             put("pluggedWireless", plugType and BatteryManager.BATTERY_PLUGGED_WIRELESS != 0)
         }
+    }
+
+    /**
+     * Battery current in mA via BatteryManager properties (there is no EXTRA_CURRENT_NOW in the
+     * sticky battery intent). Drivers report µA on most devices but mA on some; normalise.
+     */
+    private fun readCurrentMa(): Int? {
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager? ?: return null
+        var raw = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+        if (raw == 0 || raw == Int.MIN_VALUE) {
+            raw = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
+        }
+        if (raw == 0 || raw == Int.MIN_VALUE) return null
+        return if (kotlin.math.abs(raw) >= 20000) raw / 1000 else raw
     }
 
     private fun collectLocation(): JSONObject {
@@ -153,8 +167,7 @@ class DataCollector(private val context: Context) {
 
         val screenOn = try {
             val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager?
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) pm?.isScreenEnabled ?: false
-            else pm?.isInteractive ?: false
+            pm?.isInteractive ?: false
         } catch (_: Exception) {
             false
         }
@@ -283,7 +296,7 @@ class DataCollector(private val context: Context) {
             val total2 = parts2.sum()
             val idleDelta = idle2 - idle1
             val totalDelta = total2 - total1
-            if (totalDelta == 0) 0.0 else 1.0 - (idleDelta.toDouble() / totalDelta)
+            if (totalDelta == 0L) 0.0 else 1.0 - (idleDelta.toDouble() / totalDelta)
         } catch (_: Exception) {
             0.0
         }

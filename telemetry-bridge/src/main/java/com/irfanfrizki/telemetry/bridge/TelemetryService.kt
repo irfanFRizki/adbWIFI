@@ -1,21 +1,30 @@
 package com.irfanfrizki.telemetry.bridge
 
-import android.app.*
-import android.content.*
-import android.content.pm.*
-import android.net.*
-import android.os.*
-import android.util.*
-import android.webkit.MimeTypeMap
-import com.getcapacitor.Plugin
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import android.util.Log
+import androidx.core.app.NotificationCompat
 import fi.iki.elonen.NanoHTTPD
+import fi.iki.elonen.NanoHTTPD.IHTTPSession
+import fi.iki.elonen.NanoHTTPD.Response
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
 import org.json.JSONObject
-import java.io.*
-import java.net.*
-import java.util.concurrent.*
+import java.io.IOException
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.util.Collections
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 class TelemetryService : Service() {
 
@@ -23,6 +32,7 @@ class TelemetryService : Service() {
         private const val TAG = "TelemetryService"
         private const val CHANNEL_ID = "telemetry_server_channel"
         private const val NOTIF_ID = 1001
+        private const val MIME_JSON = "application/json"
         private var sContext: Context? = null
         private var sService: TelemetryService? = null
         private var sServer: TelemetryServer? = null
@@ -50,7 +60,7 @@ class TelemetryService : Service() {
             intent.action = "STOP_SERVER"
             context.stopService(intent)
             synchronized(sMutex) {
-                sServer?.stop()
+                sServer?.stopAll()
                 sServer = null
             }
             sService?.stopForeground(true)
@@ -58,13 +68,13 @@ class TelemetryService : Service() {
 
         fun isRunning(): Boolean {
             synchronized(sMutex) {
-                return sServer != null && sServer!!.isRunning()
+                return sServer?.isRunning() == true
             }
         }
 
         fun getWsUrl(): String? {
             synchronized(sMutex) {
-                return sServer?.let { "ws://${it.localAddress}:${it.wsPort}/live" }
+                return sServer?.let { "ws://${it.localAddress.hostAddress}:${it.wsPort}/live" }
             }
         }
 
@@ -74,7 +84,6 @@ class TelemetryService : Service() {
     }
 
     private val collector by lazy { DataCollector(this) }
-    private var broadcastFuture: ScheduledFuture<*>? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -85,13 +94,11 @@ class TelemetryService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-        when (action) {
+        when (intent?.action) {
             "START_SERVER" -> {
-                val configStr = intent?.getStringExtra("config") ?: "{}"
+                val configStr = intent.getStringExtra("config") ?: "{}"
                 try {
-                    val config = JSONObject(configStr)
-                    startForegroundServiceWithConfig(config)
+                    startForegroundServiceWithConfig(JSONObject(configStr))
                 } catch (e: Exception) {
                     Log.e(TAG, "Invalid config", e)
                 }
@@ -108,19 +115,20 @@ class TelemetryService : Service() {
         val wsPort = config.optInt("wsPort", 8081)
         val token = config.optString("token", "")
         val bindAll = config.optBoolean("bindAll", true)
-        val intervalSec = config.optInt("intervalSec", 2)
+        val intervalSec = config.optInt("intervalSec", 2).coerceAtLeast(1)
 
         val inetAddr = if (bindAll) InetAddress.getByName("0.0.0.0") else InetAddress.getLoopbackAddress()
 
         try {
-            synchronized(sMutex) {
-                sServer?.stop()
-                sServer = TelemetryServer(port, wsPort, inetAddr, token, collector, intervalSec)
-                sServer!!.start()
-            }
+            // Foreground notification must be shown promptly after startForegroundService().
             createNotificationChannel()
-            val server = sServer!!
-            startForeground(NOTIF_ID, buildNotification(server.localAddress, port, wsPort))
+            startForeground(NOTIF_ID, buildNotification(inetAddr, port, wsPort))
+
+            synchronized(sMutex) {
+                sServer?.stopAll()
+                sServer = TelemetryServer(port, wsPort, inetAddr, token, collector, intervalSec)
+                sServer!!.startAll()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start server", e)
             stopSelf()
@@ -140,16 +148,18 @@ class TelemetryService : Service() {
 
     private fun buildNotification(addr: InetAddress, port: Int, wsPort: Int): Notification {
         val intent = Intent(this, TelemetryService::class.java).apply { action = "STOP_SERVER" }
-        val pendingIntent = PendingIntent.getService(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pendingIntent = PendingIntent.getService(
+            this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
         val ipStr = addr.hostAddress
-        return Notification.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Telemetry Server")
             .setContentText("HTTP/WS: $ipStr:$port / $wsPort")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
-            .setPriority(Notification.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
@@ -157,10 +167,9 @@ class TelemetryService : Service() {
 
     override fun onDestroy() {
         synchronized(sMutex) {
-            sServer?.stop()
+            sServer?.stopAll()
             sServer = null
         }
-        broadcastFuture?.cancel(false)
         sService = null
         Log.i(TAG, "TelemetryService destroyed")
         super.onDestroy()
@@ -178,6 +187,11 @@ class TelemetryService : Service() {
         val localAddress: InetAddress
             get() = bindAddr
 
+        private val startTime = System.currentTimeMillis()
+        private val clients: MutableSet<WebSocket> = Collections.synchronizedSet(mutableSetOf<WebSocket>())
+        private val executor = Executors.newSingleThreadScheduledExecutor()
+        private var broadcastFuture: ScheduledFuture<*>? = null
+
         private val wsServer: WebSocketServer = object : WebSocketServer(
             InetSocketAddress(bindAddr, wsPort)
         ) {
@@ -188,169 +202,163 @@ class TelemetryService : Service() {
                 }
                 clients.add(conn)
                 Log.d(TAG, "WS client connected: ${conn.remoteSocketAddress}")
-                val data = collector.collect()
-                if (data != null) {
-                    conn.send(JSONObject().put("type", "telemetry").put("data", data).toString())
-                }
+                conn.send(JSONObject().put("type", "telemetry").put("data", collector.collect()).toString())
             }
-            override fun onClose(conn: WebSocket, code: Int, reason: String, remote: Boolean) {
+
+            override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {
                 clients.remove(conn)
                 Log.d(TAG, "WS client disconnected: $reason")
             }
+
             override fun onMessage(conn: WebSocket, message: String) {
                 try {
                     val req = JSONObject(message)
-                    val type = req.optString("type", "")
-                    when (type) {
-                        "ping" -> conn.send(JSONObject().put("type", "pong").put("ts", System.currentTimeMillis()).toString())
-                        "data" -> {
-                            val data = collector.collect()
-                            if (data != null) {
-                                conn.send(JSONObject().put("type", "telemetry").put("data", data).toString())
-                            }
-                        }
+                    when (req.optString("type", "")) {
+                        "ping" -> conn.send(
+                            JSONObject().put("type", "pong").put("ts", System.currentTimeMillis()).toString()
+                        )
+                        "data" -> conn.send(
+                            JSONObject().put("type", "telemetry").put("data", collector.collect()).toString()
+                        )
                         else -> conn.send(JSONObject().put("type", "error").put("msg", "unknown type").toString())
                     }
                 } catch (e: Exception) {
-                    conn.send(JSONObject().put("type", "error").put("msg", e.message).toString())
+                    conn.send(JSONObject().put("type", "error").put("msg", e.message ?: "error").toString())
                 }
             }
+
             override fun onError(conn: WebSocket?, ex: Exception) {
                 Log.e(TAG, "WS error", ex)
             }
+
             override fun onStart() {
                 Log.i(TAG, "WebSocket server started on $wsPort")
             }
         }
 
-        private val clients = Collections.synchronizedSet(mutableSetOf<WebSocket>())
-        private val executor = Executors.newSingleThreadScheduledExecutor()
-        private var broadcastFuture: ScheduledFuture<*>? = null
+        fun isRunning(): Boolean = isAlive
 
-        init {
-        }
-
-        fun start() {
+        /** Starts HTTP + WebSocket servers and the periodic broadcast. */
+        fun startAll() {
             try {
-                this.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+                start(SOCKET_READ_TIMEOUT, false)
                 wsServer.start()
                 Log.i(TAG, "Server started on ${bindAddr.hostAddress}:$httpPort")
-                val finalInterval = intervalSec
                 broadcastFuture = executor.scheduleAtFixedRate({
-                    val data = collector.collect()
-                    if (data != null && clients.isNotEmpty()) {
-                        val msg = JSONObject().put("type", "telemetry").put("data", data).toString()
-                        clients.forEach { it.send(msg) }
+                    try {
+                        val snapshot = synchronized(clients) { clients.toList() }
+                        if (snapshot.isNotEmpty()) {
+                            val msg = JSONObject().put("type", "telemetry").put("data", collector.collect()).toString()
+                            for (c in snapshot) {
+                                try { c.send(msg) } catch (_: Exception) {}
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Broadcast error", e)
                     }
-                }, finalInterval.toLong(), finalInterval.toLong(), TimeUnit.SECONDS)
+                }, intervalSec.toLong(), intervalSec.toLong(), TimeUnit.SECONDS)
             } catch (e: IOException) {
                 Log.e(TAG, "Server error", e)
             }
         }
 
-        fun stop() {
+        /** Stops HTTP + WebSocket servers and the periodic broadcast. */
+        fun stopAll() {
             broadcastFuture?.cancel(false)
-            try { super.stop() } catch (_: Exception) {}
+            try { stop() } catch (_: Exception) {}
             try { wsServer.stop() } catch (_: Exception) {}
             executor.shutdown()
         }
 
         private fun authenticated(handshake: ClientHandshake): Boolean {
             if (token.isEmpty()) return true
-            val auth = handshake.getFieldValue("Authorization")
+            val auth = handshake.getFieldValue("Authorization") ?: ""
             return auth.startsWith("Bearer ") && auth.substring(7) == token
         }
 
-        private fun authenticatedHeaders(headers: Map<String, List<String>>): Boolean {
-            if (token.isEmpty()) return true
-            val auth = headers["Authorization"]?.firstOrNull() ?: headers["authorization"]?.firstOrNull() ?: ""
-            return auth.startsWith("Bearer ") && auth.substring(7) == token
+        private fun jsonResponse(status: Response.IStatus, body: String): Response =
+            withCors(newFixedLengthResponse(status, MIME_JSON, body))
+
+        private fun withCors(resp: Response): Response {
+            resp.addHeader("Access-Control-Allow-Origin", "*")
+            resp.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            resp.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
+            return resp
         }
 
-        override fun run() {
-            // NanoHTTPD.start() runs the accept loop internally; this thread is just used for naming.
-        }
+        override fun serve(session: IHTTPSession): Response {
+            val method = session.method.name
+            val headers = session.headers ?: emptyMap<String, String>()
+            val parms = session.parameters ?: emptyMap<String, List<String>>()
 
-        override fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
-                    val uri = session.uri ?: "/"
-                    val method = session.method.name
-                    val headers = session.headers ?: mapOf()
-                    val parms = session.parameters ?: mapOf()
+            // CORS preflight is answered without auth
+            if (method == "OPTIONS") {
+                return jsonResponse(Response.Status.OK, "{}")
+            }
 
-                    // Auth check
-                    if (token.isNotEmpty()) {
-                        val authHeader = headers["authorization"] ?: headers["Authorization"] ?: ""
-                        val tokenParam = parms["token"]?.firstOrNull() ?: ""
-                        val authorized = (authHeader.startsWith("Bearer ") && authHeader.substring(7) == token) || tokenParam == token
-                        if (!authorized) {
-                            return newFixedLengthResponse(
-                                NanoHTTPD.Response.Status.UNAUTHORIZED, NanoHTTPD.MIME_JSON,
-                                JSONObject().put("error", "unauthorized").toString()
-                            )
-                        }
-                    }
-
-                    // CORS headers
-                    val cors = mapOf(
-                        "Access-Control-Allow-Origin" to "*",
-                        "Access-Control-Allow-Methods" to "GET, POST, OPTIONS",
-                        "Access-Control-Allow-Headers" to "Authorization, Content-Type"
+            // Auth check
+            if (token.isNotEmpty()) {
+                val authHeader = headers["authorization"] ?: ""
+                val tokenParam = parms["token"]?.firstOrNull() ?: ""
+                val authorized = (authHeader.startsWith("Bearer ") && authHeader.substring(7) == token) ||
+                        tokenParam == token
+                if (!authorized) {
+                    return jsonResponse(
+                        Response.Status.UNAUTHORIZED,
+                        JSONObject().put("error", "unauthorized").toString()
                     )
-
-                    if (method == "OPTIONS") {
-                        return newFixedLengthResponse(NanoHTTPD.Response.Status.OK, NanoHTTPD.MIME_JSON, "{}", cors)
-                    }
-
-                    if (method != "GET") {
-                        return newFixedLengthResponse(
-                            NanoHTTPD.Response.Status.METHOD_NOT_ALLOWED, NanoHTTPD.MIME_JSON, "{}", cors
-                        )
-                    }
-
-                    val path = uri.substringBefore('?')
-                    val responseJson: JSONObject?
-
-                    responseJson = when (path) {
-                        "/", "/index.html" -> null
-                        "/api/data", "/api/all" -> collector.collect()
-                        "/api/battery" -> collector.collect()?.optJSONObject("battery")
-                        "/api/location" -> collector.collect()?.optJSONObject("location")
-                        "/api/system" -> collector.collect()?.optJSONObject("system")
-                        "/api/network" -> collector.collect()?.optJSONObject("network")
-                        "/api/apps" -> collector.collect()?.optJSONArray("apps")?.let { JSONObject().put("apps", it) }
-                        "/status" -> JSONObject().put("status", "ok").put("uptime", System.currentTimeMillis())
-                        else -> null
-                    }
-
-                    if (path == "/" || path == "/index.html") {
-                        val html = """
-                            <html><head><title>Telemetry Server</title>
-                            <style>body{font-family:sans-serif;padding:20px}code{background:#f4f4f4;padding:2px 4px}</style>
-                            </head><body>
-                            <h1>Telemetry Server</h1>
-                            <p>Endpoints:</p>
-                            <ul>
-                                <li><code>/api/data</code> - All telemetry</li>
-                                <li><code>/api/battery</code> - Battery info</li>
-                                <li><code>/api/location</code> - Location</li>
-                                <li><code>/api/system</code> - RAM/CPU</li>
-                                <li><code>/api/network</code> - Network</li>
-                                <li><code>/api/apps</code> - Foreground apps</li>
-                            </ul>
-                            <p>WebSocket: <code>ws://$bindAddr:$wsPort/live</code></p>
-                            <p>Server uptime: ${(System.currentTimeMillis() - startTime) / 1000}s</p>
-                            </body></html>
-                        """.trimIndent()
-                        return newFixedLengthResponse(NanoHTTPD.Response.Status.OK, NanoHTTPD.MIME_HTML, html, cors)
-                    }
-
-                    return if (responseJson != null) {
-                        newFixedLengthResponse(NanoHTTPD.Response.Status.OK, NanoHTTPD.MIME_JSON, responseJson.toString(2), cors)
-                    } else {
-                        newFixedLengthResponse(NanoHTTPD.Response.Status.NOT_FOUND, NanoHTTPD.MIME_JSON, JSONObject().put("error", "not found").toString(), cors)
-                    }
                 }
+            }
 
-                private val startTime = System.currentTimeMillis()
+            if (method != "GET") {
+                return jsonResponse(Response.Status.METHOD_NOT_ALLOWED, "{}")
+            }
+
+            val path = session.uri?.substringBefore('?') ?: "/"
+
+            if (path == "/" || path == "/index.html") {
+                val html = """
+                    <html><head><title>Telemetry Server</title>
+                    <style>body{font-family:sans-serif;padding:20px}code{background:#f4f4f4;padding:2px 4px}</style>
+                    </head><body>
+                    <h1>Telemetry Server</h1>
+                    <p>Endpoints:</p>
+                    <ul>
+                        <li><code>/api/data</code> - All telemetry</li>
+                        <li><code>/api/battery</code> - Battery info</li>
+                        <li><code>/api/location</code> - Location</li>
+                        <li><code>/api/system</code> - RAM/CPU</li>
+                        <li><code>/api/network</code> - Network</li>
+                        <li><code>/api/apps</code> - Foreground apps</li>
+                    </ul>
+                    <p>WebSocket: <code>ws://${bindAddr.hostAddress}:$wsPort/live</code></p>
+                    <p>Server uptime: ${(System.currentTimeMillis() - startTime) / 1000}s</p>
+                    </body></html>
+                """.trimIndent()
+                return withCors(newFixedLengthResponse(Response.Status.OK, MIME_HTML, html))
+            }
+
+            val responseJson: JSONObject? = when (path) {
+                "/api/data", "/api/all" -> collector.collect()
+                "/api/battery" -> collector.collect().optJSONObject("battery")
+                "/api/location" -> collector.collect().optJSONObject("location")
+                "/api/system" -> collector.collect().optJSONObject("system")
+                "/api/network" -> collector.collect().optJSONObject("network")
+                "/api/apps" -> collector.collect().optJSONArray("apps")?.let { JSONObject().put("apps", it) }
+                "/status" -> JSONObject().put("status", "ok").put("uptime", System.currentTimeMillis() - startTime)
+                else -> null
+            }
+
+            return if (responseJson != null) {
+                jsonResponse(Response.Status.OK, responseJson.toString(2))
+            } else {
+                jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "not found").toString())
+            }
+        }
+
+        companion object {
+            private const val TAG = "TelemetryServer"
+            private const val MIME_JSON = "application/json"
+        }
     }
 }

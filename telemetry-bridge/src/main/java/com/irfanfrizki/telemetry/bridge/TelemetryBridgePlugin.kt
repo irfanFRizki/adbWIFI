@@ -1,22 +1,25 @@
 package com.irfanfrizki.telemetry.bridge
 
 import android.app.Activity
+import android.app.AppOpsManager
+import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
+import android.os.Process
 import android.provider.Settings
+import com.getcapacitor.JSObject
+import com.getcapacitor.PermissionState
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
 import org.json.JSONObject
 
 @CapacitorPlugin(
     name = "TelemetryBridge",
     permissions = [
         Permission(strings = ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"], alias = "location"),
-        Permission(strings = ["android.permission.PACKAGE_USAGE_STATS"], alias = "usageStats"),
         Permission(strings = ["android.permission.POST_NOTIFICATIONS"], alias = "notifications"),
     ]
 )
@@ -35,31 +38,33 @@ class TelemetryBridgePlugin : Plugin() {
             put("bindAll", call.getBoolean("bindAll", true))
             put("intervalSec", call.getInt("intervalSec", 2))
         }
-        TelemetryService.start(getContext(), config)
+        TelemetryService.start(context, config)
         call.resolve()
     }
 
     @PluginMethod
     fun stopServer(call: PluginCall) {
-        TelemetryService.stop(getContext())
+        TelemetryService.stop(context)
         call.resolve()
     }
 
     @PluginMethod
     fun getServerStatus(call: PluginCall) {
-        val running = TelemetryService.isRunning()
-        val wsUrl = TelemetryService.getWsUrl()
-        call.resolve(JSONObject().apply {
-            put("running", running)
-            put("wsUrl", wsUrl ?: "")
-        })
+        val result = JSObject()
+        result.put("running", TelemetryService.isRunning())
+        result.put("wsUrl", TelemetryService.getWsUrl() ?: "")
+        call.resolve(result)
     }
 
     @PluginMethod
     fun getData(call: PluginCall) {
         val data = TelemetryService.getData()
         if (data != null) {
-            call.resolve(data)
+            try {
+                call.resolve(JSObject.fromJSONObject(data))
+            } catch (e: Exception) {
+                call.reject("Failed to read data: ${e.message}")
+            }
         } else {
             call.reject("No data available")
         }
@@ -67,55 +72,58 @@ class TelemetryBridgePlugin : Plugin() {
 
     @PluginMethod
     fun getWsUrl(call: PluginCall) {
-        call.resolve(JSONObject().put("url", TelemetryService.getWsUrl() ?: ""))
+        val result = JSObject()
+        result.put("url", TelemetryService.getWsUrl() ?: "")
+        call.resolve(result)
     }
 
+    /**
+     * Overrides Plugin.requestPermissions so that the JS call returns a simple
+     * { location, usageStats, notifications } map and also opens the Usage Access
+     * settings screen (usage stats cannot be granted via a runtime dialog).
+     */
     @PluginMethod
-    fun requestPermissions(call: PluginCall) {
-        val results = JSONObject()
-        val activity = getActivity()
+    override fun requestPermissions(call: PluginCall) {
+        requestPermissionForAliases(arrayOf("location", "notifications"), call, "permissionsCallback")
+    }
 
-        // Location
-        val locGranted = requestPermission("location", 1001)
-        results.put("location", locGranted)
-
-        // Usage stats requires settings screen
-        val usageGranted = hasUsageStatsPermission()
+    @PermissionCallback
+    private fun permissionsCallback(call: PluginCall) {
+        val usageGranted = checkUsageStatsPermission()
         if (!usageGranted) {
-            openUsageAccessSettings(activity)
+            launchUsageAccessSettings(activity)
         }
-        results.put("usageStats", usageGranted)
-
-        // Notifications
-        val notifGranted = requestPermission("notifications", 1002)
-        results.put("notifications", notifGranted)
-
-        call.resolve(results)
+        val result = JSObject()
+        result.put("location", getPermissionState("location") == PermissionState.GRANTED)
+        result.put("usageStats", usageGranted)
+        result.put("notifications", getPermissionState("notifications") == PermissionState.GRANTED)
+        call.resolve(result)
     }
 
     @PluginMethod
     fun hasUsageStatsPermission(call: PluginCall) {
-        call.resolve(JSONObject().put("granted", hasUsageStatsPermission()))
+        val result = JSObject()
+        result.put("granted", checkUsageStatsPermission())
+        call.resolve(result)
     }
 
     @PluginMethod
     fun openUsageAccessSettings(call: PluginCall) {
-        val activity = getActivity()
-        openUsageAccessSettings(activity)
+        launchUsageAccessSettings(activity)
         call.resolve()
     }
 
-    private fun hasUsageStatsPermission(): Boolean {
-        val appOps = getContext().getSystemService(android.content.Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+    private fun checkUsageStatsPermission(): Boolean {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         val mode = appOps.checkOpNoThrow(
-            android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
-            android.os.Process.myUid(),
-            getContext().packageName
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            Process.myUid(),
+            context.packageName
         )
-        return mode == android.app.AppOpsManager.MODE_ALLOWED
+        return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    private fun openUsageAccessSettings(activity: Activity?) {
+    private fun launchUsageAccessSettings(activity: Activity?) {
         activity?.startActivity(
             Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
