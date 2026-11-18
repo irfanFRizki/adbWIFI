@@ -582,6 +582,15 @@
     if (window.APP_VERSION) {
       console.log(`Telemetry Server v${window.APP_VERSION} ready`);
     }
+
+    // auto-update checker (after Capacitor ready)
+    if (typeof window.checkForTelemetryUpdate === 'function') {
+      try {
+        window.checkForTelemetryUpdate();
+      } catch (e) {
+        console.warn('Update checker error:', e);
+      }
+    }
   }
 
   init();

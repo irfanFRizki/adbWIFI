@@ -263,15 +263,6 @@
     });
   }
 
-  // Jalankan cek saat aplikasi siap (bisa dipanggil ulang manual via console)
-  if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', checkForUpdate);
-    } else {
-      checkForUpdate();
-    }
-  }
-
-  // Ekspos fungsi untuk pemanggilan manual (mis. dari tab Settings)
+  // Ekspos fungsi untuk pemanggilan manual (mis. dari tab Settings / app.js)
   window.checkForTelemetryUpdate = checkForUpdate;
 })();
