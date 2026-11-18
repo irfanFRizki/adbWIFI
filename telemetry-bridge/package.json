@@ -10,7 +10,7 @@
   },
   "capacitor": {
     "android": {
-      "src": "src/main"
+      "src": "."
     }
   },
   "keywords": ["capacitor", "plugin", "telemetry"],

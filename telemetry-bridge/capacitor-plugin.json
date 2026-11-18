@@ -2,6 +2,6 @@
   "name": "telemetry-bridge",
   "version": "1.0.0",
   "android": {
-    "src": "src/main"
+    "src": "."
   }
 }
