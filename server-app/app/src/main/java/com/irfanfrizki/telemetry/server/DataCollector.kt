@@ -1,29 +1,21 @@
 package com.irfanfrizki.telemetry.server
 
 import android.app.ActivityManager
-import android.app.AppOpsManager
-import android.app.usage.UsageStats
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkInfo
-import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
-import android.os.Process
+import android.os.Bundle
+import android.os.Looper
 import android.os.SystemClock
-import android.provider.Settings
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,7 +26,61 @@ import java.util.concurrent.TimeUnit
 
 class DataCollector(private val context: Context) {
 
-    private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager?
+    companion object {
+        private const val TAG = "DataCollector"
+    }
+
+    // ---- Lokasi realtime (listener) ----
+    @Volatile private var lastLocation: Location? = null
+    private var locationRegistered = false
+
+    private val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            val cur = lastLocation
+            if (cur == null || isBetter(location, cur)) lastLocation = location
+        }
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+        @Deprecated("Deprecated in Java")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+    }
+
+    private fun isBetter(n: Location, c: Location): Boolean {
+        val dt = n.time - c.time
+        if (dt > 10_000) return true
+        if (dt < -10_000) return false
+        return n.accuracy <= c.accuracy || (n.provider == c.provider && dt >= 0)
+    }
+
+    /** Mulai menerima update lokasi tiap ~1 detik. Aman dipanggil berulang. */
+    @Synchronized
+    fun startLocationUpdates() {
+        if (locationRegistered || !Perms.hasLocation(context)) return
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager? ?: return
+        var any = false
+        for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+            try {
+                if (lm.allProviders.contains(provider)) {
+                    lm.requestLocationUpdates(provider, 1000L, 0f, locationListener, Looper.getMainLooper())
+                    any = true
+                }
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Location $provider denied: ${e.message}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Location $provider failed: ${e.message}")
+            }
+        }
+        locationRegistered = any
+    }
+
+    @Synchronized
+    fun stopLocationUpdates() {
+        try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager?
+            lm?.removeUpdates(locationListener)
+        } catch (_: Exception) {}
+        locationRegistered = false
+    }
 
     fun collect(): JSONObject {
         return try {
@@ -45,10 +91,14 @@ class DataCollector(private val context: Context) {
                 put("system", collectSystem())
                 put("network", collectNetwork())
                 put("apps", collectApps())
+                put("permissions", JSONObject().apply {
+                    put("location", Perms.hasLocation(context))
+                    put("usage", Perms.hasUsageAccess(context))
+                })
             }
         } catch (e: Exception) {
-            Log.e("DataCollector", "Error collecting data", e)
-            JSONObject().put("error", e.message)
+            Log.e(TAG, "Error collecting data", e)
+            JSONObject().put("error", e.message ?: "error")
         }
     }
 
@@ -115,43 +165,47 @@ class DataCollector(private val context: Context) {
     }
 
     private fun collectLocation(): JSONObject {
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager?
-        if (lm == null) return JSONObject().put("error", "LocationManager not available")
+        if (!Perms.hasLocation(context)) {
+            return JSONObject().put("error", "Izin lokasi belum diberikan di HP Target")
+        }
+        startLocationUpdates() // lazy: jika izin baru diberikan setelah server berjalan
 
-        var last: android.location.Location? = null
-        try {
-            val providers = lm.allProviders
-            for (provider in providers) {
-                if (provider == android.location.LocationManager.GPS_PROVIDER ||
-                    provider == android.location.LocationManager.NETWORK_PROVIDER ||
-                    provider == android.location.LocationManager.PASSIVE_PROVIDER) {
-                    val perm = android.content.pm.PackageManager.PERMISSION_GRANTED
-                    val fine = context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
-                    val coarse = context.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)
-                    if (fine == perm || coarse == perm) {
-                        val loc = lm.getLastKnownLocation(provider)
-                        if (loc != null && (last == null || loc.time > last.time)) {
-                            last = loc
-                        }
-                    }
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager?
+            ?: return JSONObject().put("error", "LocationManager tidak tersedia")
+
+        var loc: Location? = lastLocation
+        if (loc == null) {
+            try {
+                for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)) {
+                    val l = try { lm.getLastKnownLocation(p) } catch (_: IllegalArgumentException) { null }
+                    if (l != null && (loc == null || l.time > loc.time)) loc = l
                 }
+            } catch (e: SecurityException) {
+                return JSONObject().put("error", "Izin lokasi ditolak")
             }
-        } catch (e: SecurityException) {
-            return JSONObject().put("error", "Location permission denied")
         }
 
-        return if (last != null) {
-            JSONObject().apply {
-                put("lat", last.latitude)
-                put("lon", last.longitude)
-                put("accuracy", last.accuracy)
-                put("altitude", last.altitude)
-                put("speed", last.speed)
-                put("provider", last.provider)
-                put("timestamp", last.time)
-            }
-        } else {
-            JSONObject().put("error", "No location available")
+        if (loc == null) {
+            val enabled = try {
+                lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            } catch (_: Exception) { true }
+            return JSONObject().put(
+                "error",
+                if (!enabled) "Layanan lokasi (GPS) mati di HP Target" else "Menunggu sinyal lokasi..."
+            )
+        }
+
+        val age = (System.currentTimeMillis() - loc.time).coerceAtLeast(0L)
+        return JSONObject().apply {
+            put("lat", loc.latitude)
+            put("lon", loc.longitude)
+            put("accuracy", loc.accuracy.toDouble())
+            put("altitude", loc.altitude)
+            put("speed", loc.speed.toDouble())
+            put("provider", loc.provider ?: "")
+            put("timestamp", loc.time)
+            put("ageMs", age)
+            put("stale", age > 60_000L)
         }
     }
 
@@ -160,10 +214,7 @@ class DataCollector(private val context: Context) {
         val memInfo = ActivityManager.MemoryInfo()
         am?.getMemoryInfo(memInfo)
 
-        var cpuLoad = 0.0
-        try {
-            cpuLoad = readCpuUsage()
-        } catch (_: Exception) {}
+        sampleCpu()
 
         val screenOn = try {
             val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager?
@@ -172,21 +223,96 @@ class DataCollector(private val context: Context) {
             false
         }
 
-        val uptime = SystemClock.elapsedRealtime()
+        val total = memInfo.totalMem
+        val used = total - memInfo.availMem
+        val ramPct = if (total > 0) Math.round(used * 100.0 / total).toInt() else 0
 
         return JSONObject().apply {
-            put("ramTotal", memInfo.totalMem.toLong())
-            put("ramAvail", memInfo.availMem.toLong())
-            put("ramUsed", (memInfo.totalMem - memInfo.availMem).toLong())
-            put("cpuLoad", cpuLoad * 100.0)
+            put("ramTotal", total)
+            put("ramAvail", memInfo.availMem)
+            put("ramUsed", used)
+            put("ramPct", ramPct)
+            put("cpuLoad", cpuPct)          // persen 0..100, -1 = tidak tersedia
+            put("cpuSource", cpuSource)     // "proc" (akurat) | "freq" (perkiraan) | "none"
             put("screenOn", screenOn)
-            put("uptime", uptime)
+            put("uptime", SystemClock.elapsedRealtime())
             put("model", Build.MODEL)
             put("manufacturer", Build.MANUFACTURER)
             put("androidVersion", Build.VERSION.RELEASE)
             put("sdkInt", Build.VERSION.SDK_INT)
             put("cpuCores", Runtime.getRuntime().availableProcessors())
         }
+    }
+
+    // ---- CPU ----
+    private var prevTotal = 0L
+    private var prevIdle = 0L
+    private var cpuPct = -1.0
+    private var cpuSource = "none"
+    private var cpuAt = 0L
+
+    /**
+     * Android 8+ melarang aplikasi membaca /proc/stat, jadi dicoba dulu (akurat),
+     * dan jika gagal diperkirakan dari frekuensi CPU saat ini vs min/max (perkiraan).
+     * Tidak ada sleep: beban dihitung dari selisih dua pemanggilan berurutan.
+     */
+    @Synchronized
+    private fun sampleCpu() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - cpuAt < 500 && cpuSource != "none") return
+        cpuAt = now
+
+        val proc = readProcStat()
+        if (proc != null) {
+            val (total, idle) = proc
+            if (prevTotal > 0 && total > prevTotal) {
+                val dT = total - prevTotal
+                val dI = idle - prevIdle
+                cpuPct = ((1.0 - dI.toDouble() / dT) * 100.0).coerceIn(0.0, 100.0)
+                cpuSource = "proc"
+                prevTotal = total; prevIdle = idle
+                return
+            }
+            prevTotal = total; prevIdle = idle
+        }
+
+        val f = readFreqLoad()
+        if (f != null) {
+            cpuPct = f; cpuSource = "freq"
+        } else if (cpuSource != "proc") {
+            cpuPct = -1.0; cpuSource = "none"
+        }
+    }
+
+    private fun readProcStat(): Pair<Long, Long>? {
+        return try {
+            val line = File("/proc/stat").bufferedReader().use { it.readLine() } ?: return null
+            val parts = line.trim().split(Regex("\\s+"))
+            if (parts.size < 5 || parts[0] != "cpu") return null
+            val nums = parts.drop(1).take(8).map { it.toLong() }
+            val idle = nums[3] + nums.getOrElse(4) { 0L }
+            Pair(nums.sum(), idle)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun readLongFile(path: String): Long? =
+        try { File(path).readText().trim().toLong() } catch (_: Exception) { null }
+
+    private fun readFreqLoad(): Double? {
+        var sum = 0.0
+        var n = 0
+        for (i in 0 until Runtime.getRuntime().availableProcessors()) {
+            val base = "/sys/devices/system/cpu/cpu$i/cpufreq/"
+            val cur = readLongFile(base + "scaling_cur_freq") ?: continue
+            val max = readLongFile(base + "cpuinfo_max_freq") ?: readLongFile(base + "scaling_max_freq") ?: continue
+            val min = readLongFile(base + "cpuinfo_min_freq") ?: 0L
+            if (max <= min) continue
+            sum += ((cur - min).toDouble() / (max - min)).coerceIn(0.0, 1.0)
+            n++
+        }
+        return if (n > 0) sum / n * 100.0 else null
     }
 
     private fun collectNetwork(): JSONObject {
@@ -248,57 +374,84 @@ class DataCollector(private val context: Context) {
         }
     }
 
+    private var appsCache = JSONArray()
+    private var appsCacheAt = 0L
+
+    /**
+     * Aplikasi yang sedang di layar (dari UsageEvents) + aplikasi yang baru dipakai.
+     * Butuh izin "Akses Penggunaan" dan QUERY_ALL_PACKAGES (Android 11+ menyembunyikan app lain).
+     */
+    @Synchronized
+    @Suppress("DEPRECATION")
     private fun collectApps(): JSONArray {
+        val now = System.currentTimeMillis()
+        if (now - appsCacheAt < 1500) return appsCache
+        appsCacheAt = now
+
         val arr = JSONArray()
-        val pm = context.packageManager
+        if (!Perms.hasUsageAccess(context)) {
+            appsCache = arr
+            return arr
+        }
 
         try {
-            val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager?
-            if (usageStatsManager == null) return arr
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager?
+            if (usm == null) { appsCache = arr; return arr }
+            val pm = context.packageManager
 
-            val endTime = System.currentTimeMillis()
-            val beginTime = endTime - TimeUnit.DAYS.toMillis(1)
-            val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime)
-            if (stats != null) {
-                val sorted = stats.sortedByDescending { it.lastTimeUsed }
-                for (us in sorted.take(15)) {
-                    try {
-                        val appInfo = pm.getApplicationInfo(us.packageName, 0)
-                        val name = pm.getApplicationLabel(appInfo).toString()
-                        if (!name.isBlank() && us.lastTimeUsed > 0) {
-                            arr.put(JSONObject().apply {
-                                put("package", us.packageName)
-                                put("name", name)
-                                put("lastTimeUsed", us.lastTimeUsed)
-                                put("totalTimeInForeground", us.totalTimeInForeground)
-                            })
-                        }
-                    } catch (_: PackageManager.NameNotFoundException) {}
+            // 1) Aplikasi foreground saat ini: event terakhir RESUMED tanpa PAUSED sesudahnya
+            var fgPkg: String? = null
+            val seen = HashMap<String, Long>()
+            val events = usm.queryEvents(now - TimeUnit.MINUTES.toMillis(30), now)
+            val ev = UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(ev)
+                when (ev.eventType) {
+                    UsageEvents.Event.MOVE_TO_FOREGROUND -> { fgPkg = ev.packageName; seen[ev.packageName] = ev.timeStamp }
+                    UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                        if (fgPkg == ev.packageName) fgPkg = null
+                        seen[ev.packageName] = ev.timeStamp
+                    }
                 }
             }
+
+            // 2) Statistik harian untuk daftar "baru dipakai"
+            val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - TimeUnit.DAYS.toMillis(1), now)
+            val fgTime = HashMap<String, Long>()
+            if (stats != null) {
+                for (us in stats) {
+                    if (us.lastTimeUsed > 0) {
+                        seen[us.packageName] = maxOf(seen[us.packageName] ?: 0L, us.lastTimeUsed)
+                        fgTime[us.packageName] = us.totalTimeInForeground
+                    }
+                }
+            }
+
+            val ordered = seen.entries
+                .filter { it.key != context.packageName || it.key == fgPkg }
+                .sortedWith(compareByDescending<Map.Entry<String, Long>> { it.key == fgPkg }.thenByDescending { it.value })
+
+            for ((pkg, last) in ordered) {
+                if (arr.length() >= 12) break
+                val name = try {
+                    pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                } catch (_: Exception) { pkg }
+                if (name.isBlank()) continue
+                arr.put(JSONObject().apply {
+                    put("package", pkg)
+                    put("name", name)
+                    put("foreground", pkg == fgPkg)
+                    put("lastTimeUsed", if (pkg == fgPkg) now else last)
+                    put("totalTimeInForeground", fgTime[pkg] ?: 0L)
+                })
+            }
         } catch (e: SecurityException) {
-            Log.w("DataCollector", "UsageStats permission denied")
+            Log.w(TAG, "UsageStats permission denied")
+        } catch (e: Exception) {
+            Log.w(TAG, "collectApps failed: ${e.message}")
         }
 
+        appsCache = arr
         return arr
-    }
-
-    private fun readCpuUsage(): Double {
-        return try {
-            val stat1 = File("/proc/stat").readText()
-            val parts1 = stat1.lines().first().split("\\s+".toRegex()).drop(1).map { it.toLong() }
-            val idle1 = parts1[3] + parts1[4]
-            val total1 = parts1.sum()
-            Thread.sleep(200)
-            val stat2 = File("/proc/stat").readText()
-            val parts2 = stat2.lines().first().split("\\s+".toRegex()).drop(1).map { it.toLong() }
-            val idle2 = parts2[3] + parts2[4]
-            val total2 = parts2.sum()
-            val idleDelta = idle2 - idle1
-            val totalDelta = total2 - total1
-            if (totalDelta == 0L) 0.0 else 1.0 - (idleDelta.toDouble() / totalDelta)
-        } catch (_: Exception) {
-            0.0
-        }
     }
 }

@@ -25,9 +25,9 @@
 
 <main class="dashboard">
   <div class="grid grid-2">
-    <section class="card card-battery">
+    <section class="card card-battery" id="cardBattery">
       <div class="card-head"><h3>Baterai</h3><span class="chip" id="chipBatStatus">—</span></div>
-      <div class="big"> <span id="valBatLevel" class="big-val">—</span><span class="big-unit">%</span></div>
+      <div class="big"><span class="bolt" id="bolt" aria-hidden="true">&#9889;</span><span id="valBatLevel" class="big-val">—</span><span class="big-unit">%</span></div>
       <div class="mini-row"><span id="valBatTemp">—</span><span id="valBatVolt">—</span><span id="valBatCurr">—</span></div>
       <div class="bar-wrap"><div class="bar-label">Level</div><div class="bar"><i id="barBat" style="width:0%"></i></div></div>
       <div class="foot mono" id="footBat"></div>
@@ -35,6 +35,7 @@
 
     <section class="card card-location">
       <div class="card-head"><h3>Lokasi</h3><span class="chip ok" id="chipLoc">—</span></div>
+      <div class="street" id="valStreet">Menunggu lokasi...</div>
       <div class="coord-row"><span id="valLat">—</span><span id="valLon">—</span></div>
       <div class="mini-row"><span id="valAcc">—</span><span id="valAlt">—</span><span id="valProv">—</span></div>
       <div class="foot mono" id="footLoc"></div>
@@ -45,8 +46,8 @@
     <section class="card card-system">
       <div class="card-head"><h3>Sistem</h3><span class="chip" id="chipSys">—</span></div>
       <div class="mini-row"><span id="valRam">—</span><span id="valCpu">—</span><span id="valScreen">—</span></div>
-      <div class="bar-wrap"><div class="bar-label">RAM</div><div class="bar"><i id="barRam" style="width:0%"></i></div></div>
-      <div class="bar-wrap"><div class="bar-label">CPU</div><div class="bar"><i id="barCpu" style="width:0%"></i></div></div>
+      <div class="bar-wrap"><div class="bar-label" id="lblRam">RAM</div><div class="bar"><i id="barRam" style="width:0%"></i></div></div>
+      <div class="bar-wrap"><div class="bar-label" id="lblCpu">CPU</div><div class="bar"><i id="barCpu" style="width:0%"></i></div></div>
       <div class="foot mono" id="footSys"></div>
     </section>
 

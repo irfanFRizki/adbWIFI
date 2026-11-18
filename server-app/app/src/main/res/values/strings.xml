@@ -21,4 +21,6 @@
     <string name="server_stopped_msg">Server stopped</string>
     <string name="invalid_config">Invalid configuration</string>
     <string name="permissions_needed">Location and Usage Stats permissions required</string>
+    <string name="grant_permissions">Beri Izin (Lokasi &amp; Akses Penggunaan)</string>
+    <string name="perm_status_title">Izin</string>
 </resources>

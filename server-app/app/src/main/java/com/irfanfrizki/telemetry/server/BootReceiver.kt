@@ -15,7 +15,7 @@ class BootReceiver : BroadcastReceiver() {
                 val port = prefs.getString("http_port", "8080")?.toIntOrNull() ?: 8080
                 val wsPort = prefs.getString("ws_port", "8765")?.toIntOrNull() ?: 8765
                 val token = prefs.getString("auth_token", "") ?: ""
-                val interval = prefs.getString("update_interval", "5")?.toIntOrNull() ?: 5
+                val interval = prefs.getString("update_interval", "1")?.toIntOrNull() ?: 1
                 TelemetryService.start(context, port, wsPort, token, interval)
             }
         }

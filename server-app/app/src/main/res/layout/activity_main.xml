@@ -72,6 +72,20 @@
                     android:text="@string/copy"
                     android:layout_marginTop="8dp" />
 
+                <TextView
+                    android:id="@+id/tvPermStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:layout_marginTop="16dp" />
+
+                <Button
+                    android:id="@+id/btnPermissions"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/grant_permissions"
+                    android:layout_marginTop="8dp" />
+
             </LinearLayout>
 
         </com.google.android.material.card.MaterialCardView>

@@ -26,6 +26,11 @@
     btnRefresh: $('#btnRefresh'),
 
     chipBatStatus: $('#chipBatStatus'),
+    cardBattery: $('#cardBattery'),
+    bolt: $('#bolt'),
+    valStreet: $('#valStreet'),
+    lblRam: $('#lblRam'),
+    lblCpu: $('#lblCpu'),
     valBatLevel: $('#valBatLevel'),
     valBatTemp: $('#valBatTemp'),
     valBatVolt: $('#valBatVolt'),
@@ -155,25 +160,94 @@
   }
 
   // ===== Rendering =====
-  function renderApps(apps) {
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function renderApps(apps, perms) {
     if (!els.listApps) return;
-    if (!apps || !apps.length) {
+    if (perms && perms.usage === false) {
       els.listApps.innerHTML = '';
-      if (els.footApps) els.footApps.textContent = 'Tidak ada aplikasi foreground';
+      setChip(els.chipApps, 'Izin belum diberikan', 'warn');
+      if (els.footApps) els.footApps.textContent = 'Di HP Target: buka aplikasi Server, tekan "Beri Izin", lalu aktifkan Akses Penggunaan untuk Telemetry Server.';
       return;
     }
-    els.listApps.innerHTML = apps.map(a => `
-      <li>
-        <span class="app-icon">${(a.name || a.package || '?')[0].toUpperCase()}</span>
+    if (!apps || !apps.length) {
+      els.listApps.innerHTML = '';
+      setChip(els.chipApps, '—', '');
+      if (els.footApps) els.footApps.textContent = 'Belum ada data aplikasi (HP Target mungkin belum dipakai).';
+      return;
+    }
+    const fg = apps.find((a) => a.foreground);
+    setChip(els.chipApps, fg ? (fg.name || fg.package) : 'Tidak ada yang terbuka', fg ? 'ok' : '');
+    els.listApps.innerHTML = apps.map((a) => `
+      <li class="${a.foreground ? 'is-fg' : ''}">
+        <span class="app-icon">${esc((a.name || a.package || '?')[0].toUpperCase())}</span>
         <div class="app-info">
-          <div class="app-name">${a.name || a.package}</div>
-          <div class="app-pkg">${a.package}</div>
+          <div class="app-name">${esc(a.name || a.package)}${a.foreground ? '<span class="app-live">AKTIF</span>' : ''}</div>
+          <div class="app-pkg">${esc(a.package)}</div>
         </div>
-        <span class="app-time">${a.lastTimeUsed ? formatMs(Date.now() - a.lastTimeUsed) + ' lalu' : '—'}</span>
+        <span class="app-time">${a.foreground ? 'sekarang' : (a.lastTimeUsed ? formatMs(Date.now() - a.lastTimeUsed) + ' lalu' : '—')}</span>
       </li>
     `).join('');
-    if (els.footApps) els.footApps.textContent = `${apps.length} aplikasi`;
+    if (els.footApps) els.footApps.textContent = fg ? `Sedang dibuka: ${fg.name || fg.package}` : `${apps.length} aplikasi terakhir dipakai`;
   }
+
+  // ----- Nama jalan (reverse geocoding OpenStreetMap/Nominatim, perlu internet di HP Pantau) -----
+  let geo = { lat: null, lon: null, at: 0, text: '' };
+  let geoBusy = false;
+
+  function distM(lat1, lon1, lat2, lon2) {
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+    const x = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(x));
+  }
+
+  function formatAddress(j) {
+    const a = (j && j.address) || {};
+    const road = a.road || a.pedestrian || a.path || a.residential || a.footway || a.highway || '';
+    const street = road ? (a.house_number ? `${road} No. ${a.house_number}` : road) : '';
+    const area = a.neighbourhood || a.quarter || a.hamlet || '';
+    const kel = a.suburb || a.village || a.city_district || '';
+    const city = a.city || a.town || a.municipality || a.county || a.state_district || '';
+    const parts = [street, area, kel, city].filter(Boolean);
+    const uniq = parts.filter((p, i) => parts.indexOf(p) === i);
+    if (uniq.length) return uniq.join(', ');
+    return (j && (j.name || j.display_name) ? String(j.name || j.display_name).split(',').slice(0, 3).join(',').trim() : '');
+  }
+
+  async function updateStreet(lat, lon) {
+    if (!els.valStreet || lat == null || lon == null) return;
+    if (geo.text) { els.valStreet.textContent = geo.text; els.valStreet.classList.remove('dim'); }
+    if (geoBusy) return;
+    const since = Date.now() - geo.at;
+    const moved = geo.lat == null ? Infinity : distM(geo.lat, geo.lon, lat, lon);
+    const need = (geo.lat == null && since >= 10000) || (geo.lat != null && moved >= 30 && since >= 5000);
+    if (!need) return;
+
+    geoBusy = true;
+    geo.at = Date.now();
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), 8000) : null;
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&accept-language=id&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+      const res = await fetch(url, ctl ? { signal: ctl.signal } : undefined);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const text = formatAddress(await res.json());
+      geo = { lat, lon, at: Date.now(), text };
+      els.valStreet.textContent = text || 'Nama jalan tidak ditemukan';
+      els.valStreet.classList.toggle('dim', !text);
+    } catch (_) {
+      if (!geo.text) {
+        els.valStreet.textContent = 'Nama jalan belum tersedia (HP Pantau perlu internet)';
+        els.valStreet.classList.add('dim');
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+      geoBusy = false;
+    }
+  }
+
+  let lastGoodLoc = null;
 
   function render(data) {
     if (!data) return;
@@ -181,28 +255,47 @@
     if (data.battery) {
       const b = data.battery;
       const level = b.level ?? 0;
-      const status = b.charging ? 'charging' : (level <= 15 ? 'low' : 'ok');
-      setChip(els.chipBatStatus, b.charging ? 'Mengisi' : 'Discharging', status);
+      const isCharging = b.status === 'charging'; // animasi hanya saat benar-benar mengisi
+      const chipKind = isCharging ? 'charging' : (level <= 15 ? 'low' : 'ok');
+      setChip(els.chipBatStatus, b.status === 'full' ? 'Penuh' : (isCharging ? 'Mengisi' : 'Discharging'), chipKind);
       if (els.valBatLevel) els.valBatLevel.textContent = level;
+      if (els.bolt) els.bolt.classList.toggle('on', isCharging);
+      if (els.cardBattery) els.cardBattery.classList.toggle('is-charging', isCharging);
       if (els.barBat) {
         els.barBat.style.width = `${clamp(level, 0, 100)}%`;
-        els.barBat.className = level <= 15 ? 'low' : (level <= 40 ? 'mid' : '');
+        els.barBat.className = [isCharging ? 'charging' : '', level <= 15 ? 'low' : (level <= 40 ? 'mid' : '')].filter(Boolean).join(' ');
       }
       if (els.valBatTemp) els.valBatTemp.textContent = b.temp ? `${Number(b.temp).toFixed(1)}°C` : '—';
       if (els.valBatVolt) els.valBatVolt.textContent = b.voltageMv ? `${(b.voltageMv / 1000).toFixed(2)}V` : '—';
-      if (els.valBatCurr) els.valBatCurr.textContent = b.currentMa ? `${b.currentMa}mA` : '—';
-      if (els.footBat) els.footBat.textContent = `Health: ${b.health || '—'} • Tech: ${b.technology || '—'} • ${new Date(b.timestamp || Date.now()).toLocaleTimeString()}`;
+      if (els.valBatCurr) els.valBatCurr.textContent = b.currentMa != null ? `${b.currentMa > 0 ? '+' : ''}${b.currentMa}mA` : '—';
+      if (els.footBat) els.footBat.textContent = `Health: ${b.health || '—'} • Tech: ${b.technology || '—'} • ${new Date(data.timestamp || Date.now()).toLocaleTimeString()}`;
     }
 
     if (data.location) {
       const l = data.location;
-      setChip(els.chipLoc, l.provider || 'GPS', (l.accuracy || 999) <= 20 ? 'ok' : 'warn');
-      if (els.valLat) els.valLat.textContent = l.lat != null ? Number(l.lat).toFixed(6) : '—';
-      if (els.valLon) els.valLon.textContent = l.lon != null ? Number(l.lon).toFixed(6) : '—';
-      if (els.valAcc) els.valAcc.textContent = l.accuracy ? `±${Math.round(l.accuracy)}m` : '—';
-      if (els.valAlt) els.valAlt.textContent = l.altitude ? `${Number(l.altitude).toFixed(1)}m` : '—';
-      if (els.valProv) els.valProv.textContent = l.provider || '—';
-      if (els.footLoc) els.footLoc.textContent = `Speed: ${l.speed ? Number(l.speed).toFixed(1) + ' m/s' : '—'} • ${new Date(l.timestamp || Date.now()).toLocaleTimeString()}`;
+      if (l.lat == null || l.lon == null) {
+        // Server melaporkan error/tunggu (izin, GPS mati, belum ada fix). Jangan hapus data terakhir.
+        setChip(els.chipLoc, lastGoodLoc ? 'Lokasi lama' : 'Menunggu', 'warn');
+        if (els.footLoc) els.footLoc.textContent = l.error || 'Lokasi tidak tersedia';
+        if (!lastGoodLoc) {
+          if (els.valLat) els.valLat.textContent = '—';
+          if (els.valLon) els.valLon.textContent = '—';
+          if (els.valStreet) { els.valStreet.textContent = l.error || 'Menunggu lokasi...'; els.valStreet.classList.add('dim'); }
+        }
+      } else {
+        lastGoodLoc = l;
+        const stale = l.stale || (l.ageMs != null && l.ageMs > 60000);
+        setChip(els.chipLoc, stale ? 'Lama' : (l.provider || 'GPS'), stale ? 'warn' : ((l.accuracy || 999) <= 30 ? 'ok' : 'warn'));
+        if (els.valLat) els.valLat.textContent = Number(l.lat).toFixed(6);
+        if (els.valLon) els.valLon.textContent = Number(l.lon).toFixed(6);
+        if (els.valAcc) els.valAcc.textContent = l.accuracy ? `±${Math.round(l.accuracy)}m` : '—';
+        if (els.valAlt) els.valAlt.textContent = l.altitude ? `${Number(l.altitude).toFixed(0)}m` : '—';
+        if (els.valProv) els.valProv.textContent = l.provider || '—';
+        const kmh = l.speed ? `${(Number(l.speed) * 3.6).toFixed(0)} km/j` : '0 km/j';
+        const age = l.ageMs != null ? `diperbarui ${formatMs(l.ageMs)} lalu` : new Date(l.timestamp || Date.now()).toLocaleTimeString();
+        if (els.footLoc) els.footLoc.textContent = `Kecepatan: ${kmh} • ${age}`;
+        updateStreet(Number(l.lat), Number(l.lon));
+      }
     } else {
       setChip(els.chipLoc, 'Tidak tersedia', 'err');
       if (els.valLat) els.valLat.textContent = '—';
@@ -212,12 +305,17 @@
     if (data.system) {
       const s = data.system;
       setChip(els.chipSys, s.screenOn ? 'Screen ON' : 'Screen OFF', s.screenOn ? 'ok' : '');
-      const ramUsed = (s.ramTotal || 0) - (s.ramAvail || 0);
-      const ramPct = s.ramTotal ? Math.round((ramUsed / s.ramTotal) * 100) : 0;
-      const cpuPct = Math.round(s.cpuLoad || 0);
-      if (els.valRam) els.valRam.textContent = `${formatBytes(ramUsed)} / ${formatBytes(s.ramTotal)}`;
-      if (els.valCpu) els.valCpu.textContent = `${cpuPct}%`;
+      const ramUsed = s.ramUsed != null ? s.ramUsed : (s.ramTotal || 0) - (s.ramAvail || 0);
+      const ramPct = s.ramPct != null ? s.ramPct : (s.ramTotal ? Math.round((ramUsed / s.ramTotal) * 100) : 0);
+      // Server lama mengirim cpuLoad=0 tanpa cpuSource: anggap tidak tersedia
+      const cpuKnown = s.cpuLoad != null && s.cpuLoad >= 0 && !(s.cpuSource === undefined && s.cpuLoad === 0) && s.cpuSource !== 'none';
+      const cpuPct = cpuKnown ? Math.round(s.cpuLoad) : 0;
+      const approx = s.cpuSource === 'freq' ? '≈' : '';
+      if (els.valRam) els.valRam.textContent = `RAM ${ramPct}% (${formatBytes(ramUsed)} / ${formatBytes(s.ramTotal)})`;
+      if (els.valCpu) els.valCpu.textContent = cpuKnown ? `CPU ${approx}${cpuPct}%` : 'CPU n/a';
       if (els.valScreen) els.valScreen.textContent = s.screenOn ? 'ON' : 'OFF';
+      if (els.lblRam) els.lblRam.textContent = `RAM ${ramPct}%`;
+      if (els.lblCpu) els.lblCpu.textContent = cpuKnown ? `CPU ${approx}${cpuPct}%${s.cpuCores ? ' • ' + s.cpuCores + ' core' : ''}` : 'CPU tidak tersedia';
       if (els.barRam) {
         els.barRam.style.width = `${clamp(ramPct, 0, 100)}%`;
         els.barRam.className = ramPct > 85 ? 'low' : (ramPct > 60 ? 'mid' : '');
@@ -226,7 +324,10 @@
         els.barCpu.style.width = `${clamp(cpuPct, 0, 100)}%`;
         els.barCpu.className = cpuPct > 85 ? 'low' : (cpuPct > 60 ? 'mid' : '');
       }
-      if (els.footSys) els.footSys.textContent = `Model: ${s.model || '—'} • Android: ${s.androidVersion || '—'} • Uptime: ${formatUptime(s.uptime)}`;
+      if (els.footSys) {
+        els.footSys.textContent = `Model: ${s.model || '—'} • Android: ${s.androidVersion || '—'} • Uptime: ${formatUptime(s.uptime)}` +
+          (s.cpuSource === 'freq' ? ' • CPU diperkirakan dari frekuensi (Android membatasi pembacaan beban CPU)' : '');
+      }
     }
 
     if (data.network) {
@@ -238,7 +339,7 @@
       if (els.footNet) els.footNet.textContent = `BSSID: ${n.bssid || '—'} • Public IP: ${n.ipPublic || '—'}`;
     }
 
-    if (data.apps) renderApps(data.apps);
+    if (data.apps) renderApps(data.apps, data.permissions);
 
     if (els.rawJson) els.rawJson.textContent = JSON.stringify(data, null, 2);
   }

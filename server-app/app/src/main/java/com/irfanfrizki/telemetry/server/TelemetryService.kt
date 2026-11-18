@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -142,16 +143,33 @@ class TelemetryService : Service() {
         try {
             // Foreground notification must be shown promptly after startForegroundService().
             createNotificationChannel()
-            startForeground(NOTIF_ID, buildNotification(inetAddr, port, wsPort))
+            enterForeground(buildNotification(inetAddr, port, wsPort))
 
             synchronized(sMutex) {
                 sServer?.stopAll()
                 sServer = TelemetryServer(port, wsPort, inetAddr, token, collector, intervalSec)
                 sServer!!.startAll()
+            collector.startLocationUpdates()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start server", e)
             stopSelf()
+        }
+    }
+
+    /** Foreground service bertipe dataSync (+ location jika izin lokasi ada) supaya lokasi tetap jalan di background. */
+    private fun enterForeground(notif: Notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            if (Perms.hasLocation(this)) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            try {
+                startForeground(NOTIF_ID, notif, type)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "FGS location type refused, fallback to dataSync: ${e.message}")
+                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            }
+        } else {
+            startForeground(NOTIF_ID, notif)
         }
     }
 
@@ -186,6 +204,7 @@ class TelemetryService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        try { collector.stopLocationUpdates() } catch (_: Exception) {}
         synchronized(sMutex) {
             sServer?.stopAll()
             sServer = null

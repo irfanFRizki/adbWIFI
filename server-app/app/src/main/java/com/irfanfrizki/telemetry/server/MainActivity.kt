@@ -3,7 +3,13 @@ package com.irfanfrizki.telemetry.server
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.Manifest
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.appcompat.app.AlertDialog
+import androidx.core.app.ActivityCompat
 import android.net.ConnectivityManager
 import android.net.NetworkInfo
 import android.net.wifi.WifiInfo
@@ -22,6 +28,11 @@ import com.google.android.material.textfield.TextInputEditText
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val REQ_BASIC = 101
+        private const val REQ_BG = 102
+    }
+
     private lateinit var tvStatus: TextView
     private lateinit var tvLocalIp: TextView
     private lateinit var tvWsUrl: TextView
@@ -34,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etToken: TextInputEditText
     private lateinit var etInterval: TextInputEditText
     private lateinit var cbBindAll: MaterialCheckBox
+    private lateinit var tvPermStatus: TextView
+    private lateinit var btnPermissions: Button
 
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences("telemetry_server", Context.MODE_PRIVATE)
@@ -55,6 +68,8 @@ class MainActivity : AppCompatActivity() {
         etToken = findViewById(R.id.etToken)
         etInterval = findViewById(R.id.etInterval)
         cbBindAll = findViewById(R.id.cbBindAll)
+        tvPermStatus = findViewById(R.id.tvPermStatus)
+        btnPermissions = findViewById(R.id.btnPermissions)
 
         loadSettings()
         updateUI()
@@ -63,13 +78,89 @@ class MainActivity : AppCompatActivity() {
         btnStop.setOnClickListener { stopServer() }
         btnSave.setOnClickListener { saveSettings() }
         btnCopyWsUrl.setOnClickListener { copyWsUrl() }
+        btnPermissions.setOnClickListener { requestBasicPermissions() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updatePermStatus()
+        updateUI()
+    }
+
+    // ===== Izin: lokasi -> lokasi latar belakang -> akses penggunaan =====
+    private fun updatePermStatus() {
+        val loc = Perms.hasLocation(this)
+        val bg = Perms.hasBackgroundLocation(this)
+        val usage = Perms.hasUsageAccess(this)
+        fun mark(ok: Boolean) = if (ok) "✔" else "✘"
+        tvPermStatus.text = "Lokasi: ${mark(loc)}   Lokasi di background: ${mark(bg)}   Akses Penggunaan (app aktif): ${mark(usage)}"
+        btnPermissions.isEnabled = !(loc && bg && usage)
+    }
+
+    private fun requestBasicPermissions() {
+        val need = mutableListOf<String>()
+        if (!Perms.hasFineLocation(this)) {
+            need += Manifest.permission.ACCESS_FINE_LOCATION
+            need += Manifest.permission.ACCESS_COARSE_LOCATION
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            need += Manifest.permission.POST_NOTIFICATIONS
+        }
+        if (need.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, need.toTypedArray(), REQ_BASIC)
+        } else {
+            askBackgroundLocation()
+        }
+    }
+
+    private fun askBackgroundLocation() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && Perms.hasLocation(this) && !Perms.hasBackgroundLocation(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Lokasi di background")
+                .setMessage("Agar lokasi tetap terkirim saat aplikasi tidak dibuka, pilih \"Izinkan sepanjang waktu\" pada layar berikutnya.")
+                .setPositiveButton("Lanjut") { _, _ ->
+                    ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), REQ_BG)
+                }
+                .setNegativeButton("Lewati") { _, _ -> askUsageAccess() }
+                .show()
+        } else {
+            askUsageAccess()
+        }
+    }
+
+    private fun askUsageAccess() {
+        if (!Perms.hasUsageAccess(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Akses Penggunaan")
+                .setMessage("Untuk menampilkan aplikasi yang sedang aktif, aktifkan \"Telemetry Server\" di layar Akses Penggunaan berikutnya.")
+                .setPositiveButton("Buka Pengaturan") { _, _ ->
+                    try {
+                        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    } catch (_: Exception) {
+                        Toast.makeText(this, "Buka Pengaturan > Akses penggunaan secara manual", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .setNegativeButton("Nanti", null)
+                .show()
+        }
+        updatePermStatus()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        updatePermStatus()
+        when (requestCode) {
+            REQ_BASIC -> askBackgroundLocation()
+            REQ_BG -> askUsageAccess()
+        }
     }
 
     private fun loadSettings() {
         etPort.setText(prefs.getString("http_port", "8080").toString())
         etWsPort.setText(prefs.getString("ws_port", "8765").toString())
         etToken.setText(prefs.getString("auth_token", ""))
-        etInterval.setText(prefs.getString("update_interval", "5").toString())
+        etInterval.setText(prefs.getString("update_interval", "1").toString())
         cbBindAll.isChecked = prefs.getBoolean("bind_all", true)
     }
 
@@ -77,7 +168,7 @@ class MainActivity : AppCompatActivity() {
         val port = etPort.text.toString().toIntOrNull() ?: 8080
         val wsPort = etWsPort.text.toString().toIntOrNull() ?: 8765
         val token = etToken.text.toString()
-        val interval = etInterval.text.toString().toIntOrNull() ?: 5
+        val interval = etInterval.text.toString().toIntOrNull() ?: 1
 
         prefs.edit {
             putString("http_port", port.toString())
@@ -93,7 +184,7 @@ class MainActivity : AppCompatActivity() {
         val port = etPort.text.toString().toIntOrNull() ?: 8080
         val wsPort = etWsPort.text.toString().toIntOrNull() ?: 8765
         val token = etToken.text.toString()
-        val interval = etInterval.text.toString().toIntOrNull() ?: 5
+        val interval = etInterval.text.toString().toIntOrNull() ?: 1
 
         TelemetryService.start(this, port, wsPort, token, interval)
         updateUI()
