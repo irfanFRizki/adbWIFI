@@ -202,7 +202,8 @@ object RootManager {
             // current_now biasanya dalam µA, ubah ke mA
             currentNow?.let { put("currentMa", (it.toLong() / 1000)) }
             currentAvg?.let { put("currentAvgMa", (it.toLong() / 1000)) }
-            voltageNow?.let { put("voltageMv", it.toLong()) }
+            // voltage_now umumnya dalam µV (mis. 3818388); beberapa perangkat sudah mV
+            voltageNow?.toLongOrNull()?.let { put("voltageMv", if (it > 100_000L) it / 1000 else it) }
             capacityNow?.let { put("level", it.toInt()) }
             capacityDesign?.let { put("designCapacityMah", (it.toLong() / 1000)) }
             capacityFull?.let { put("fullCapacityMah", (it.toLong() / 1000)) }

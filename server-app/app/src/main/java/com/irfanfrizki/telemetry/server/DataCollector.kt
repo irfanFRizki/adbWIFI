@@ -606,12 +606,8 @@ class DataCollector(val context: Context) {
                     put("cpu", RootManager.getCpuDetails())
                     RootManager.getGpuFreq()?.let { put("gpu", it) }
                 }
-                if (RootFeatures.isEnabled(context, "foreground_app")) {
-                    put("fgapp", RootManager.getForegroundApp())
-                }
-                if (RootFeatures.isEnabled(context, "ui_dump")) {
-                    RootManager.getUiDump()?.let { put("uidump", it) }
-                }
+                // fgapp & uidump TIDAK diambil periodik: keduanya berat (dumpsys / uiautomator via su tiap interval
+                // membuat CPU & suhu naik). Dashboard mengambilnya on-demand: /api/root/fgapp dan /api/root/uidump.
                 // Data opsional (lebih berat, di-load on-demand via endpoint terpisah)
                 put("hasProcessList", RootFeatures.isEnabled(context, "process_list"))
                 put("hasNetworkConnections", RootFeatures.isEnabled(context, "network_detail"))
