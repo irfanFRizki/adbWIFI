@@ -224,11 +224,13 @@ object RootManager {
             val typeFile = File(zone, "type")
             val temp = readSysFile(tempFile.absolutePath)
             val type = readSysFile(typeFile.absolutePath)
-            temp?.let {
+            val c = temp?.toDoubleOrNull()?.div(1000.0)
+            // Lewati sensor virtual/tidak valid (mis. "soc" = 0, level threshold pmi632-*-lvl*, nilai negatif)
+            if (c != null && c > 0.5 && c < 150 && type?.contains("-lvl") != true) {
                 arr.put(JSONObject().apply {
                     put("zone", zone.name)
                     put("type", type ?: "unknown")
-                    put("tempC", String.format("%.1f", it.toDouble() / 1000))
+                    put("tempC", Math.round(c * 10) / 10.0)
                 })
             }
         }
@@ -299,7 +301,7 @@ object RootManager {
             val lines = File(path).readText().lines()
             if (lines.size > 1) {
                 lines.drop(1).take(20).forEach { line ->
-                    val parts = line.trim().split("\\s+")
+                    val parts = line.trim().split(Regex("\\s+"))
                     if (parts.size >= 10) {
                         arr.put(JSONObject().apply {
                             put("proto", path.substringAfterLast("/"))
@@ -320,7 +322,7 @@ object RootManager {
         val output = executeRootCommandBlocking("cat /proc/net/arp")
         val arr = JSONArray()
         output?.lines()?.drop(1)?.forEach { line ->
-            val parts = line.trim().split("\\s+")
+            val parts = line.trim().split(Regex("\\s+"))
             if (parts.size >= 6) {
                 arr.put(JSONObject().apply {
                     put("ip", parts[0])
@@ -348,7 +350,7 @@ object RootManager {
         val output = executeRootCommandBlocking("cat /proc/net/xt_qtaguid/stats 2>/dev/null | head -30")
         val arr = JSONArray()
         output?.lines()?.drop(1)?.forEach { line ->
-            val parts = line.trim().split("\\s+")
+            val parts = line.trim().split(Regex("\\s+"))
             if (parts.size >= 8) {
                 arr.put(JSONObject().apply {
                     put("uid", parts[3])
@@ -425,8 +427,15 @@ object RootManager {
     // ===== Helper =====
 
     private fun readSysFile(path: String): String? {
-        return try {
+        val direct = try {
             File(path).readText().trim().takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+        if (direct != null) return direct
+        // Android 14+ SELinux: banyak node /sys (mis. power_supply) tidak terbaca app biasa -> baca via root
+        return try {
+            executeRootCommandBlocking("cat $path 2>/dev/null")?.trim()?.takeIf { it.isNotBlank() }
         } catch (_: Exception) {
             null
         }
@@ -435,7 +444,7 @@ object RootManager {
     private fun readProcStat(): Pair<Long, Long>? {
         return try {
             val line = File("/proc/stat").readText().lines().firstOrNull() ?: return null
-            val parts = line.trim().split("\\s+")
+            val parts = line.trim().split(Regex("\\s+"))
             if (parts.size >= 5) {
                 val user = parts[1].toLongOrNull() ?: 0L
                 val nice = parts[2].toLongOrNull() ?: 0L

@@ -479,8 +479,8 @@ class DataCollector(val context: Context) {
             while (events.hasNextEvent()) {
                 events.getNextEvent(ev)
                 when (ev.eventType) {
-                    UsageEvents.Event.MOVE_TO_FOREGROUND -> { fgPkg = ev.packageName; seen[ev.packageName] = ev.timeStamp }
-                    UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                    UsageEvents.Event.MOVE_TO_FOREGROUND, UsageEvents.Event.ACTIVITY_RESUMED -> { fgPkg = ev.packageName; seen[ev.packageName] = ev.timeStamp }
+                    UsageEvents.Event.MOVE_TO_BACKGROUND, UsageEvents.Event.ACTIVITY_PAUSED -> {
                         if (fgPkg == ev.packageName) fgPkg = null
                         seen[ev.packageName] = ev.timeStamp
                     }
