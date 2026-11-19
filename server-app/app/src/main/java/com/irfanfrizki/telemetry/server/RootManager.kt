@@ -149,6 +149,10 @@ object RootManager {
         return output?.let { android.util.Base64.encodeToString(it.toByteArray(), android.util.Base64.NO_WRAP) }
     }
 
+    /** Baris agregat "cpu ..." dari /proc/stat via root (app biasa diblokir SELinux di Android 8+). */
+    fun readProcStatLineRoot(): String? =
+        executeRootCommandBlocking("head -n 1 /proc/stat")?.lineSequence()?.firstOrNull { it.startsWith("cpu ") }
+
     /** Aplikasi foreground akurat via dumpsys window/activity. */
     fun getForegroundApp(): JSONObject? {
         val output = executeRootCommandBlocking("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' | head -1")
