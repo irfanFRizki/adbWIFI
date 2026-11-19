@@ -451,44 +451,56 @@ class TelemetryService : Service() {
                 return withCors(newFixedLengthResponse(Response.Status.OK, MIME_HTML, html))
             }
 
-            val responseJson: JSONObject? = when (path) {
-                "/api/data", "/api/all" -> collector.collect()
-                "/api/battery" -> collector.collect().optJSONObject("battery")
-                "/api/location" -> collector.collect().optJSONObject("location")
-                "/api/system" -> collector.collect().optJSONObject("system")
-                "/api/network" -> collector.collect().optJSONObject("network")
-                "/api/apps" -> collector.collect().optJSONArray("apps")?.let { JSONObject().put("apps", it) }
-                // ---- Root-only endpoints ----
-                "/api/root/status" -> collector.collect().optJSONObject("root") ?: JSONObject().put("available", false)
-                "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(sContext))
-                "/api/root/features/update" -> JSONObject().put("error", "Use POST /api/root/features/update")
-                "/api/root/screenshot" -> if (!checkRootFeature("screenshot")) rootDenied("screenshot") else JSONObject().apply {
-                    val b64 = RootManager.takeScreenshot()
-                    put("screenshot", b64 ?: JSONObject.NULL)
-                    put("ok", b64 != null)
-                }
-                "/api/root/fgapp" -> if (!checkRootFeature("foreground_app")) rootDenied("foreground_app") else RootManager.getForegroundApp()
-                "/api/root/uidump" -> if (!checkRootFeature("ui_dump")) rootDenied("ui_dump") else RootManager.getUiDump()?.let { JSONObject().put("uidump", it) }
-                "/api/root/proclist" -> if (!checkRootFeature("process_list")) rootDenied("process_list") else RootManager.getProcessList().let { JSONObject().put("procs", it) }
-                "/api/root/netconn" -> if (!checkRootFeature("network_detail")) rootDenied("network_detail") else JSONObject().put("connections", RootManager.getNetworkConnections())
-                "/api/root/arp" -> if (!checkRootFeature("network_detail")) rootDenied("network_detail") else JSONObject().put("arp", RootManager.getArpTable())
-                "/api/root/uidstats" -> if (!checkRootFeature("data_usage")) rootDenied("data_usage") else JSONObject().put("stats", RootManager.getUidNetworkStats())
-                "/api/root/calllog" -> if (!checkRootFeature("sensitive_data")) rootDenied("sensitive_data") else JSONObject().put("calls", RootManager.getCallLog())
-                "/api/root/sms" -> if (!checkRootFeature("sensitive_data")) rootDenied("sensitive_data") else JSONObject().put("messages", RootManager.getSms())
-                "/api/root/appsizes" -> if (!checkRootFeature("sensitive_data")) rootDenied("sensitive_data") else JSONObject().put("apps", RootManager.getInstalledAppsWithSize())
-                "/api/root/battery" -> if (!checkRootFeature("battery_detail")) rootDenied("battery_detail") else RootManager.getBatteryCurrent()
-                "/api/root/thermal" -> if (!checkRootFeature("thermal")) rootDenied("thermal") else JSONObject().put("thermal", RootManager.getThermalSensors())
-                "/api/root/cpu" -> if (!checkRootFeature("cpu_detail")) rootDenied("cpu_detail") else RootManager.getCpuDetails()
-                "/api/root/gpu" -> if (!checkRootFeature("cpu_detail")) rootDenied("cpu_detail") else JSONObject().put("gpu", RootManager.getGpuFreq())
-                "/status" -> JSONObject().put("status", "ok").put("uptime", System.currentTimeMillis() - startTime)
-                else -> null
-            }
+            private fun serveWithAuth(session: IHTTPSession): Response {
+                        val path = session.uri?.substringBefore('?') ?: "/"
+            
+                        // Helper untuk root endpoints yang butuh feature check
+                        fun rootJsonOrDenied(feature: String, block: () -> JSONObject?): JSONObject? {
+                            if (!checkRootFeature(feature)) return null
+                            return block()
+                        }
 
-            return if (responseJson != null) {
-                jsonResponse(Response.Status.OK, responseJson.toString(2))
-            } else {
-                jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "not found").toString())
-            }
+                        val responseJson: JSONObject? = when (path) {
+                            "/api/data", "/api/all" -> collector.collect()
+                            "/api/battery" -> collector.collect().optJSONObject("battery")
+                            "/api/location" -> collector.collect().optJSONObject("location")
+                            "/api/system" -> collector.collect().optJSONObject("system")
+                            "/api/network" -> collector.collect().optJSONObject("network")
+                            "/api/apps" -> collector.collect().optJSONArray("apps")?.let { JSONObject().put("apps", it) }
+                            // ---- Root-only endpoints ----
+                            "/api/root/status" -> collector.collect().optJSONObject("root") ?: JSONObject().put("available", false)
+                            "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(sContext))
+                            "/api/root/features/update" -> JSONObject().put("error", "Use POST /api/root/features/update")
+                            "/api/root/screenshot" -> rootJsonOrDenied("screenshot") { RootManager.takeScreenshot()?.let { JSONObject().apply { put("screenshot", it); put("ok", true) } } }
+                            "/api/root/fgapp" -> rootJsonOrDenied("foreground_app") { RootManager.getForegroundApp() }
+                            "/api/root/uidump" -> rootJsonOrDenied("ui_dump") { RootManager.getUiDump()?.let { JSONObject().put("uidump", it) } }
+                            "/api/root/proclist" -> rootJsonOrDenied("process_list") { RootManager.getProcessList().let { JSONObject().put("procs", it) } }
+                            "/api/root/netconn" -> rootJsonOrDenied("network_detail") { JSONObject().put("connections", RootManager.getNetworkConnections()) }
+                            "/api/root/arp" -> rootJsonOrDenied("network_detail") { JSONObject().put("arp", RootManager.getArpTable()) }
+                            "/api/root/uidstats" -> rootJsonOrDenied("data_usage") { JSONObject().put("stats", RootManager.getUidNetworkStats()) }
+                            "/api/root/calllog" -> rootJsonOrDenied("sensitive_data") { JSONObject().put("calls", RootManager.getCallLog()) }
+                            "/api/root/sms" -> rootJsonOrDenied("sensitive_data") { JSONObject().put("messages", RootManager.getSms()) }
+                            "/api/root/appsizes" -> rootJsonOrDenied("sensitive_data") { JSONObject().put("apps", RootManager.getInstalledAppsWithSize()) }
+                            "/api/root/battery" -> rootJsonOrDenied("battery_detail") { RootManager.getBatteryCurrent() }
+                            "/api/root/thermal" -> rootJsonOrDenied("thermal") { JSONObject().put("thermal", RootManager.getThermalSensors()) }
+                            "/api/root/cpu" -> rootJsonOrDenied("cpu_detail") { RootManager.getCpuDetails() }
+                            "/api/root/gpu" -> rootJsonOrDenied("cpu_detail") { JSONObject().put("gpu", RootManager.getGpuFreq()) }
+                            "/status" -> JSONObject().put("status", "ok").put("uptime", System.currentTimeMillis() - startTime)
+                            else -> null
+                        }
+
+                        return if (responseJson != null) {
+                            jsonResponse(Response.Status.OK, responseJson.toString(2))
+                        } else {
+                            // Check if it was a root feature denial
+                            val isRootPath = path.startsWith("/api/root/") && path != "/api/root/status" && path != "/api/root/features" && path != "/api/root/features/update"
+                            if (isRootPath && !checkRootFeature(path)) {
+                                rootDenied(path.removePrefix("/api/root/"))
+                            } else {
+                                jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "not found").toString())
+                            }
+                        }
+                    }
         }
 
         private fun checkRootFeature(feature: String): Boolean {
