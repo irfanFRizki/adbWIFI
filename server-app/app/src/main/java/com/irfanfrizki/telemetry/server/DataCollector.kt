@@ -591,37 +591,37 @@ class DataCollector(val context: Context) {
     }
 
     /** Data root-only: screenshot, active app, battery current, thermal, CPU freq, network, dll. */
-        private fun collectRoot(): JSONObject {
-            return RootManager.getRootInfo(context).apply {
-                val status = RootManager.checkRootStatus(context)
-                put("features", RootFeatures.toJson(context))
-                if (status == RootManager.RootStatus.MAGISK_GRANTED || status == RootManager.RootStatus.GENERIC_SU) {
-                    // Data yang dibutuhkan dashboard (ringan, cacheable)
-                    if (RootFeatures.isEnabled(context, "battery_detail")) {
-                        put("battery", RootManager.getBatteryCurrent())
-                    }
-                    if (RootFeatures.isEnabled(context, "thermal")) {
-                        put("thermal", RootManager.getThermalSensors())
-                    }
-                    if (RootFeatures.isEnabled(context, "cpu_detail")) {
-                        put("cpu", RootManager.getCpuDetails())
-                        RootManager.getGpuFreq()?.let { put("gpu", it) }
-                    }
-                    if (RootFeatures.isEnabled(context, "foreground_app")) {
-                        put("fgapp", RootManager.getForegroundApp())
-                    }
-                    if (RootFeatures.isEnabled(context, "ui_dump")) {
-                        RootManager.getUiDump()?.let { put("uidump", it) }
-                    }
-                    // Data opsional (lebih berat, di-load on-demand via endpoint terpisah)
-                    put("hasProcessList", RootFeatures.isEnabled(context, "process_list"))
-                    put("hasNetworkConnections", RootFeatures.isEnabled(context, "network_detail"))
-                    put("hasArpTable", RootFeatures.isEnabled(context, "network_detail"))
-                    put("hasUidStats", RootFeatures.isEnabled(context, "data_usage"))
-                    put("hasCallLog", RootFeatures.isEnabled(context, "sensitive_data"))
-                    put("hasSms", RootFeatures.isEnabled(context, "sensitive_data"))
-                    put("hasAppSizes", RootFeatures.isEnabled(context, "sensitive_data"))
-                    put("hasWifiPasswords", RootFeatures.isEnabled(context, "wifi_passwords"))
+    private fun collectRoot(): JSONObject {
+        return RootManager.getRootInfo(context).apply {
+            val status = RootManager.checkRootStatus(context)
+            put("features", RootFeatures.toJson(context))
+            if (status == RootManager.RootStatus.MAGISK_GRANTED || status == RootManager.RootStatus.GENERIC_SU) {
+                // Data yang dibutuhkan dashboard (ringan, cacheable)
+                if (RootFeatures.isEnabled(context, "battery_detail")) {
+                    put("battery", RootManager.getBatteryCurrent())
                 }
+                if (RootFeatures.isEnabled(context, "thermal")) {
+                    put("thermal", RootManager.getThermalSensors())
+                }
+                if (RootFeatures.isEnabled(context, "cpu_detail")) {
+                    put("cpu", RootManager.getCpuDetails())
+                    RootManager.getGpuFreq()?.let { put("gpu", it) }
+                }
+                if (RootFeatures.isEnabled(context, "foreground_app")) {
+                    put("fgapp", RootManager.getForegroundApp())
+                }
+                if (RootFeatures.isEnabled(context, "ui_dump")) {
+                    RootManager.getUiDump()?.let { put("uidump", it) }
+                }
+                // Data opsional (lebih berat, di-load on-demand via endpoint terpisah)
+                put("hasProcessList", RootFeatures.isEnabled(context, "process_list"))
+                put("hasNetworkConnections", RootFeatures.isEnabled(context, "network_detail"))
+                put("hasArpTable", RootFeatures.isEnabled(context, "network_detail"))
+                put("hasUidStats", RootFeatures.isEnabled(context, "data_usage"))
+                put("hasCallLog", RootFeatures.isEnabled(context, "sensitive_data"))
+                put("hasSms", RootFeatures.isEnabled(context, "sensitive_data"))
+                put("hasAppSizes", RootFeatures.isEnabled(context, "sensitive_data"))
+                put("hasWifiPasswords", RootFeatures.isEnabled(context, "wifi_passwords"))
             }
         }
+    }
