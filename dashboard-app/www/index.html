@@ -95,11 +95,29 @@
     <div class="sheet-foot">
       <button type="button" class="btn ghost" id="btnStartServer">Mulai Server</button>
       <button type="button" class="btn ghost" id="btnStopServer">Hentikan Server</button>
+      <button type="button" class="btn ghost" id="btnQuickConnect">Koneksi ke Server</button>
       <button type="button" class="btn ghost" id="btnManageDevices">Kelola Perangkat</button>
       <button type="button" class="btn ghost" id="btnCheckUpdate">Cek Update</button>
       <button type="submit" class="btn primary">Simpan</button>
     </div>
   </form>
+</div>
+
+<div id="layerQuickConnect" class="layer hidden">
+  <div class="scrim" data-close></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="qcTitle">
+    <div class="sheet-head"><div><h2 id="qcTitle">Koneksi ke Server</h2><p class="sub mono">Masukkan IP dan port WebSocket server telemetry</p></div><button class="icon-btn" data-close aria-label="Tutup">&#10005;</button></div>
+    <div class="sheet-body">
+      <label class="field"><span>IP / Hostname Server</span><input id="qcHost" placeholder="mis. 192.168.1.50" required></label>
+      <label class="field"><span>Port WebSocket</span><input id="qcWsPort" inputmode="numeric" value="8765" required></label>
+      <label class="field"><span>Token API (Bearer)</span><div class="row"><input id="qcToken" type="password" autocapitalize="off" spellcheck="false"><button type="button" class="btn ghost small" id="qcTokenToggle">Lihat</button></div></label>
+      <p class="hint">Pastikan HP ini dan server berada di jaringan yang sama (Wi-Fi/LAN/Tailscale).</p>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" class="btn primary" id="btnQuickConnectGo">Hubungkan</button>
+      <button type="button" class="btn ghost" data-close>Batal</button>
+    </div>
+  </section>
 </div>
 
 <div id="layerDevices" class="layer hidden">
@@ -114,7 +132,7 @@
         <label class="field"><span>Nama Perangkat</span><input id="addDevName" placeholder="mis. HP Kantor, HP Rumah" required></label>
         <label class="field"><span>IP / Hostname Server</span><input id="addDevHost" placeholder="mis. 192.168.1.50 atau telemetry.local" required></label>
         <label class="field"><span>Port HTTP</span><input id="addDevPort" inputmode="numeric" value="8080" required></label>
-        <label class="field"><span>Port WebSocket</span><input id="addDevWsPort" inputmode="numeric" value="8081" required></label>
+        <label class="field"><span>Port WebSocket</span><input id="addDevWsPort" inputmode="numeric" value="8765" required></label>
         <label class="field"><span>Token API (Bearer)</span><div class="row"><input id="addDevToken" type="password" autocapitalize="off" spellcheck="false"><button type="button" class="btn ghost small" id="addDevTokenToggle">Lihat</button></div></label>
         <button type="submit" class="btn primary">Simpan Perangkat</button>
       </form>

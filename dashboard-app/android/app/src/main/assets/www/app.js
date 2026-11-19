@@ -99,6 +99,13 @@
     tokenToggle: $('#tokenToggle'),
     btnStartServer: $('#btnStartServer'),
     btnStopServer: $('#btnStopServer'),
+    btnQuickConnect: $('#btnQuickConnect'),
+    btnQuickConnectGo: $('#btnQuickConnectGo'),
+    layerQuickConnect: $('#layerQuickConnect'),
+    qcHost: $('#qcHost'),
+    qcWsPort: $('#qcWsPort'),
+    qcToken: $('#qcToken'),
+    qcTokenToggle: $('#qcTokenToggle'),
 
     // detail layer
     layerDetail: $('#layerDetail'),
@@ -483,6 +490,81 @@
     els.addDevToken.type = isPwd ? 'text' : 'password';
     els.addDevTokenToggle.textContent = isPwd ? 'Sembunyikan' : 'Lihat';
   }
+
+  async function onQuickConnect() {
+    const host = els.qcHost.value.trim();
+    const wsPort = parseInt(els.qcWsPort.value, 10);
+    const token = els.qcToken.value.trim();
+    if (!host || !Number.isInteger(wsPort) || wsPort < 1 || wsPort > 65535) {
+      showToast('Isi IP server dan port WebSocket yang valid', true);
+      return;
+    }
+    const url = `ws://${host}:${wsPort}${token ? '?token=' + encodeURIComponent(token) : ''}`;
+    wsUrl = url;
+    if (wsUnsub) wsUnsub();
+    wsUnsub = T.wsOn(handleWsMessage);
+    T.wsConnect(url);
+    showBanner(`Mencoba terhubung ke ${host}:${wsPort}`, 'warn');
+    closeLayer(els.layerQuickConnect);
+  }
+
+  function toggleQuickConnectToken() {
+    const isPwd = els.qcToken.type === 'password';
+    els.qcToken.type = isPwd ? 'text' : 'password';
+    els.qcTokenToggle.textContent = isPwd ? 'Sembunyikan' : 'Lihat';
+  }
+
+  function openQuickConnect() {
+    els.qcHost.value = currentDevice?.host || '';
+    els.qcWsPort.value = String(currentDevice?.wsPort || 8765);
+    els.qcToken.value = currentDevice?.token || '';
+    closeLayer(els.layerSettings);
+    openLayer(els.layerQuickConnect);
+  }
+
+  async function saveQuickConnect() {
+    const host = els.qcHost.value.trim();
+    const wsPort = parseInt(els.qcWsPort.value, 10);
+    const token = els.qcToken.value.trim();
+    if (!host || !Number.isInteger(wsPort) || wsPort < 1 || wsPort > 65535) return;
+    let dev = devices.find(d => d.host === host && d.wsPort === wsPort);
+    if (!dev) {
+      dev = { id: 'dev_' + Date.now(), name: host, host, port: settings.port || 8080, wsPort, token };
+      devices.push(dev);
+    } else {
+      dev.token = token;
+    }
+    currentDevice = dev;
+    currentDeviceId = dev.id;
+    await saveDevices();
+    await T.prefSet(CURRENT_DEVICE_STORAGE_KEY, currentDeviceId);
+    renderDeviceSelector();
+    renderDevicesList();
+  }
+
+  async function onQuickConnectGo() {
+    await saveQuickConnect();
+    await onQuickConnect();
+  }
+
+  els.btnQuickConnect.addEventListener('click', openQuickConnect);
+  els.btnQuickConnectGo.addEventListener('click', onQuickConnectGo);
+  els.qcTokenToggle.addEventListener('click', toggleQuickConnectToken);
+  els.btnQuickConnect.style.display = 'inline-flex';
+  els.btnQuickConnectGo.addEventListener('click', (e) => e.preventDefault());
+  els.btnQuickConnectGo.closest('.sheet').addEventListener('submit', (e) => e.preventDefault());
+  els.layerQuickConnect.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); onQuickConnectGo(); }
+  });
+  els.layerQuickConnect = document.getElementById('layerQuickConnect');
+  els.qcHost = document.getElementById('qcHost');
+  els.qcWsPort = document.getElementById('qcWsPort');
+  els.qcToken = document.getElementById('qcToken');
+  els.qcTokenToggle = document.getElementById('qcTokenToggle');
+  els.btnQuickConnect = document.getElementById('btnQuickConnect');
+  els.btnQuickConnectGo = document.getElementById('btnQuickConnectGo');
+
+  function _bindQuickConnect() {}
 
   // ===== Copy JSON =====
   async function copyJson() {

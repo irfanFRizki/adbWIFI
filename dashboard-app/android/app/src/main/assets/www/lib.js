@@ -88,7 +88,7 @@ const TelemetryLib = (() => {
   // ===== Settings =====
   const defaults = {
     port: 8080,
-    wsPort: 8081,
+    wsPort: 8765,
     token: '',
     bindAll: '1',
     interval: '2',
