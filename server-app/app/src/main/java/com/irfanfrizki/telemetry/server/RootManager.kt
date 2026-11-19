@@ -63,9 +63,9 @@ object RootManager {
      * Langsung coba jalankan "su -c id" dan lihat hasilnya.
      */
     private fun computeRootStatus(context: Context): RootStatus {
-        // Coba jalankan su -c id (timeout 5 detik)
-        val output = executeRootCommandBlocking("id")
-        val hasRootAccess = output?.contains("uid=0") == true
+            // Coba jalankan su -c id (timeout 5 detik) — memicu dialog Magisk secara otomatis
+            val output = executeRootCommandBlocking("su -c id")
+            val hasRootAccess = output?.contains("uid=0") == true
 
         // Cek apakah Magisk terpasang (via package manager atau path khas)
         val isMagisk = try {
@@ -90,41 +90,46 @@ object RootManager {
      */
     /** Blocking version untuk dipakai di computeRootStatus (non-suspend). */
     private fun executeRootCommandBlocking(cmd: String): String? {
-        return try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            return try {
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
             
-            // Baca output dengan timeout yang benar
-            val output = StringBuilder()
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                output.append(line).append('\n')
+                // Baca output di thread terpisah agar tidak deadlock dengan waitFor
+                val output = StringBuilder()
+                val reader = BufferedReader(InputStreamReader(process.inputStream))
+                val readerThread = Thread {
+                    try {
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            output.append(line).append('\n')
+                        }
+                    } catch (_: Exception) {}
+                }
+                readerThread.start()
+            
+                // Wait with timeout
+                val finished = process.waitFor(SU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                if (!finished) {
+                    process.destroyForcibly()
+                    Log.w(TAG, "su -c timeout: $cmd")
+                    readerThread.join(100)
+                    return null
+                }
+            
+                readerThread.join(100)
+            
+                val exitValue = process.exitValue()
+                if (exitValue != 0) {
+                    val err = process.errorStream.bufferedReader().use { it.readText() }
+                    Log.w(TAG, "su -c exit $exitValue: $cmd, err: $err")
+                    return null
+                }
+            
+                output.toString().trim()
+            } catch (e: Exception) {
+                Log.w(TAG, "su -c failed: $cmd", e)
+                null
             }
-            
-            // Wait with timeout
-            val finished = process.waitFor(SU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            if (!finished) {
-                process.destroyForcibly()
-                Log.w(TAG, "su -c timeout: $cmd")
-                return null
-            }
-            
-            val exitValue = process.exitValue()
-            if (exitValue != 0) {
-                val err = process.errorStream.bufferedReader().use { it.readText() }
-                Log.w(TAG, "su -c exit $exitValue: $cmd, err: $err")
-                return null
-            }
-            
-            output.toString().trim()
-        } catch (e: TimeoutException) {
-            Log.w(TAG, "su -c timeout exception: $cmd")
-            null
-        } catch (e: Exception) {
-            Log.w(TAG, "su -c failed: $cmd", e)
-            null
         }
-    }
 
     /** Jalankan banyak perintah root sekaligus (satu su session), return map cmd->output. */
     fun executeRootCommands(cmds: Array<String>): Map<String, String?> {
