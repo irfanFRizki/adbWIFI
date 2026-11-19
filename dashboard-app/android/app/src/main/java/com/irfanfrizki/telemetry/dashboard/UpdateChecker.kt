@@ -199,8 +199,8 @@ class UpdateBridge(
 ) {
     private val checker = UpdateChecker(activity) { msg ->
         // Lapor status ke JS via evaluateJavascript
-        val js = "typeof window._onUpdateStatus === 'function' && window._onUpdateStatus("
-            + JSONObject().put("state", "error").put("message", msg).toString() + ")"
+        val json = JSONObject().put("state", "error").put("message", msg).toString()
+        val js = "typeof window._onUpdateStatus === 'function' && window._onUpdateStatus($json)"
         webView.post { webView.evaluateJavascript(js, null) }
     }
 
@@ -261,8 +261,7 @@ class UpdateBridge(
                                     lastPct = pct
                                     webViewRef.post {
                                         webViewRef.evaluateJavascript(
-                                            "typeof window._onUpdateStatus === 'function' && window._onUpdateStatus("
-                                                + JSONObject().put("state", "downloading").put("progress", pct).toString() + ")", null)
+                                            "typeof window._onUpdateStatus === 'function' && window._onUpdateStatus(${JSONObject().put("state", "downloading").put("progress", pct).toString()})", null)
                                     }
                                 }
                             }
@@ -275,9 +274,7 @@ class UpdateBridge(
             } catch (e: Exception) {
                 webViewRef.post {
                     webViewRef.evaluateJavascript(
-                        "typeof window._onUpdateStatus === 'function' && window._onUpdateStatus("
-                            + JSONObject().put("state", "error").put("phase", "download")
-                            .put("message", "Gagal unduh: ${e.message ?: "kesalahan jaringan"}").toString() + ")", null)
+                        "typeof window._onUpdateStatus === 'function' && window._onUpdateStatus(${JSONObject().put("state", "error").put("phase", "download").put("message", "Gagal unduh: ${e.message ?: "kesalahan jaringan"}").toString()})", null)
                 }
                 return@Thread
             }
@@ -287,9 +284,7 @@ class UpdateBridge(
                 val ok = checker.install(downloaded!!)
                 if (!ok) {
                     webViewRef.evaluateJavascript(
-                        "typeof window._onUpdateStatus === 'function' && window._onUpdateStatus("
-                            + JSONObject().put("state", "error").put("phase", "install")
-                            .put("message", "Izinkan pemasangan dari sumber tidak dikenal").toString() + ")", null)
+                        "typeof window._onUpdateStatus === 'function' && window._onUpdateStatus(${JSONObject().put("state", "error").put("phase", "install").put("message", "Izinkan pemasangan dari sumber tidak dikenal").toString()})", null)
                 }
             }
         }.start()

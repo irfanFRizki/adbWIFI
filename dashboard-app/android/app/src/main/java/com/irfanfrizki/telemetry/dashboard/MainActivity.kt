@@ -22,7 +22,6 @@ class MainActivity : AppCompatActivity() {
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         settings.allowFileAccess = true
         settings.allowContentAccess = true
-        settings.setAppCacheEnabled(true)
 
         webView.webViewClient = WebViewClient()
         webView.webChromeClient = WebChromeClient()

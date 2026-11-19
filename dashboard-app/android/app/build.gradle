@@ -15,7 +15,7 @@ android {
 
     signingConfigs {
         release {
-            storeFile rootProject.file('../ci/adbwifi.keystore')
+            storeFile rootProject.file('../../ci/adbwifi.keystore')
             storePassword 'adbwifi-ci'
             keyAlias 'adbwifi'
             keyPassword 'adbwifi-ci'
