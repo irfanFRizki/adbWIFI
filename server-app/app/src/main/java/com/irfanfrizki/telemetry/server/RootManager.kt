@@ -57,41 +57,38 @@ object RootManager {
         return checkRootStatus(context)
     }
 
-    /** 
-     * Cek status root dengan benar untuk Magisk modern.
-     * Kuncinya: JANGAN cek File.exists() path su — Magisk menyembunyikannya.
-     * Langsung coba jalankan "su -c id" dan lihat hasilnya.
-     */
-    private fun computeRootStatus(context: Context): RootStatus {
+    /**
+         * Cek status root dengan benar untuk Magisk modern.
+         * Kuncinya: JANGAN cek File.exists() path su — Magisk menyembunyikannya.
+         * Langsung coba jalankan "su -c id" dan lihat hasilnya.
+         */
+        private fun computeRootStatus(context: Context): RootStatus {
             // Coba jalankan su -c id (timeout 5 detik) — memicu dialog Magisk secara otomatis
             val output = executeRootCommandBlocking("su -c id")
             val hasRootAccess = output?.contains("uid=0") == true
 
-        // Cek apakah Magisk terpasang (via package manager atau path khas)
-        val isMagisk = try {
-            context.packageManager.getPackageInfo("com.topjohnwu.magisk", 0)
-            true
-        } catch (_: Exception) {
-            // Fallback: cek path Magisk yang mungkin terbaca
-            File("/data/adb/magisk").exists() || File("/magisk").exists()
+            // Cek apakah Magisk terpasang (via package manager atau path khas)
+            val isMagisk = try {
+                context.packageManager.getPackageInfo("com.topjohnwu.magisk", 0)
+                true
+            } catch (_: Exception) {
+                // Fallback: cek path Magisk yang mungkin terbaca
+                File("/data/adb/magisk").exists() || File("/magisk").exists()
+            }
+
+            return when {
+                isMagisk && hasRootAccess -> RootStatus.MAGISK_GRANTED
+                isMagisk -> RootStatus.MAGISK_DENIED
+                hasRootAccess -> RootStatus.GENERIC_SU
+                else -> RootStatus.NONE
+            }
         }
 
-        return when {
-            isMagisk && hasRootAccess -> RootStatus.MAGISK_GRANTED
-            isMagisk -> RootStatus.MAGISK_DENIED
-            hasRootAccess -> RootStatus.GENERIC_SU
-            else -> RootStatus.NONE
-        }
-    }
-
-    /**
-     * Jalankan perintah root di thread terpisah (IO), kembalikan output (trimmed)
-     * atau null jika gagal/timeout. Menggunakan timeout yang benar.
-     */
-    /** Blocking version untuk dipakai di computeRootStatus (non-suspend). */
-    private fun executeRootCommandBlocking(cmd: String): String? {
-            return try {
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+        /**
+         * Jalankan perintah root di thread terpisah (IO), kembalikan output (trimmed)
+         * atau null jika gagal/timeout. Menggunakan timeout yang benar.
+         */
+        private fun executeRootCommandBlocking(cmd: String): String? {
             
                 // Baca output di thread terpisah agar tidak deadlock dengan waitFor
                 val output = StringBuilder()
