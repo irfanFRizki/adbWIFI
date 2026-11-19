@@ -452,23 +452,23 @@ class TelemetryService : Service() {
                             }
 
                             val rootFeature = when (path) {
-                "/api/root/screenshot" -> "screenshot"
-                "/api/root/fgapp" -> "foreground_app"
-                "/api/root/uidump" -> "ui_dump"
-                "/api/root/proclist" -> "process_list"
-                "/api/root/netconn", "/api/root/arp" -> "network_detail"
-                "/api/root/uidstats" -> "data_usage"
-                "/api/root/calllog", "/api/root/sms", "/api/root/appsizes" -> "sensitive_data"
-                "/api/root/battery" -> "battery_detail"
-                "/api/root/thermal" -> "thermal"
-                "/api/root/cpu", "/api/root/gpu" -> "cpu_detail"
-                else -> null
-            }
-            if (rootFeature != null && !checkRootFeature(rootFeature)) {
-                return rootDenied(rootFeature)
-            }
+                                "/api/root/screenshot" -> "screenshot"
+                                "/api/root/fgapp" -> "foreground_app"
+                                "/api/root/uidump" -> "ui_dump"
+                                "/api/root/proclist" -> "process_list"
+                                "/api/root/netconn", "/api/root/arp" -> "network_detail"
+                                "/api/root/uidstats" -> "data_usage"
+                                "/api/root/calllog", "/api/root/sms", "/api/root/appsizes" -> "sensitive_data"
+                                "/api/root/battery" -> "battery_detail"
+                                "/api/root/thermal" -> "thermal"
+                                "/api/root/cpu", "/api/root/gpu" -> "cpu_detail"
+                                else -> null
+                            }
+                            if (rootFeature != null && !checkRootFeature(rootFeature)) {
+                                return rootDenied(rootFeature)
+                            }
 
-            val responseJson: JSONObject? = when (path) {
+                            val responseJson: JSONObject? = when (path) {
                 "/api/data", "/api/all" -> collector.collect()
                 "/api/battery" -> collector.collect().optJSONObject("battery")
                 "/api/location" -> collector.collect().optJSONObject("location")
