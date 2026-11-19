@@ -476,7 +476,7 @@ class TelemetryService : Service() {
                 "/api/network" -> collector.collect().optJSONObject("network")
                 "/api/apps" -> collector.collect().optJSONArray("apps")?.let { JSONObject().put("apps", it) }
                 "/api/root/status" -> collector.collect().optJSONObject("root") ?: JSONObject().put("available", false)
-                "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(sContext))
+                "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(collector.context())),
                 "/api/root/features/update" -> JSONObject().put("error", "Use POST /api/root/features/update")
                 "/api/root/screenshot" -> JSONObject().apply {
                     val b64 = RootManager.takeScreenshot()
