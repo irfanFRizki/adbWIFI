@@ -169,6 +169,19 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-dashboard-
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: dashboard-app/package-lock.json
+
+      - name: Install npm dependencies & sync Capacitor plugins
+        run: |
+          npm ci
+          npx cap sync android
+        working-directory: ${{ github.workspace }}/dashboard-app
+
       # ── Tentukan versionName & versionCode dari git tag (sama seperti kalender-PL) ──
       - name: Tentukan versionName & versionCode
         id: dash_ver

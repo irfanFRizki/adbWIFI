@@ -1,21 +1,12 @@
 package com.irfanfrizki.telemetry.dashboard
 
 import android.os.Bundle
-import android.webkit.WebView
-import androidx.appcompat.app.AppCompatActivity
+import com.getcapacitor.BridgeActivity
+import com.irfanfrizki.telemetry.dashboard.plugins.ApkInstallerPlugin
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        registerPlugin(ApkInstallerPlugin::class.java)
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        val webView: WebView = findViewById(R.id.web_view)
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            allowFileAccess = true
-            allowContentAccess = true
-        }
-        webView.loadUrl("file:///android_asset/www/index.html")
     }
 }
