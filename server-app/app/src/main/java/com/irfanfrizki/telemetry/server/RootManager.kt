@@ -11,6 +11,9 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.File
 import java.util.concurrent.TimeUnit
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeoutException
 
 /**
@@ -85,10 +88,6 @@ object RootManager {
      * Jalankan perintah root di thread terpisah (IO), kembalikan output (trimmed)
      * atau null jika gagal/timeout. Menggunakan timeout yang benar.
      */
-    private suspend fun executeRootCommandSuspend(cmd: String): String? = withContext(Dispatchers.IO) {
-        executeRootCommandBlocking(cmd)
-    }
-
     /** Blocking version untuk dipakai di computeRootStatus (non-suspend). */
     private fun executeRootCommandBlocking(cmd: String): String? {
         return try {
@@ -456,6 +455,39 @@ object RootManager {
             } else null
         } catch (_: Exception) {
             null
+        }
+    }
+
+    /** Kirim input (tap, swipe, keyevent, text). */
+    fun sendInput(cmd: String): Boolean {
+        return executeRootCommandBlocking("input $cmd") != null
+    }
+
+    /** Kontrol aplikasi (am start, am force-stop, pm grant/revoke). */
+    fun controlApp(action: String, pkg: String, extra: String = ""): Boolean {
+        return when (action) {
+            "start" -> executeRootCommandBlocking("am start -n $extra") != null
+            "force-stop" -> executeRootCommandBlocking("am force-stop $pkg") != null
+            "grant" -> executeRootCommandBlocking("pm grant $pkg $extra") != null
+            "revoke" -> executeRootCommandBlocking("pm revoke $pkg $extra") != null
+            "clear" -> executeRootCommandBlocking("pm clear $pkg") != null
+            else -> false
+        }
+    }
+
+    /** Kontrol sistem: screen, wifi, airplane, brightness, volume, reboot. */
+    fun controlSystem(action: String, value: String = ""): Boolean {
+        return when (action) {
+            "screen_on" -> executeRootCommandBlocking("input keyevent KEYCODE_WAKEUP") != null
+            "screen_off" -> executeRootCommandBlocking("input keyevent KEYCODE_SLEEP") != null
+            "wifi" -> executeRootCommandBlocking("svc wifi ${value.lowercase()}") != null
+            "airplane" -> executeRootCommandBlocking("settings put global airplane_mode_on ${if (value == "on") 1 else 0}; am broadcast -a android.intent.action.AIRPLANE_MODE --ez state ${value == "on"}") != null
+            "brightness" -> executeRootCommandBlocking("settings put system screen_brightness $value") != null
+            "volume" -> executeRootCommandBlocking("media volume --stream 3 --set $value") != null
+            "reboot" -> executeRootCommandBlocking("reboot") != null
+            "adb_wifi_on" -> executeRootCommandBlocking("setprop service.adb.tcp.port 5555; stop adbd; start adbd") != null
+            "adb_wifi_off" -> executeRootCommandBlocking("setprop service.adb.tcp.port -1; stop adbd; start adbd") != null
+            else -> false
         }
     }
 
