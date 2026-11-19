@@ -256,6 +256,7 @@ class DataCollector(val context: Context) {
     private var cpuPct = -1.0
     private var cpuSource = "none"
     private var cpuAt = 0L
+    private var cpuRootAt = 0L
 
     // diagnosis: sumber mana yang bisa dipakai di HP ini (tampil di JSON: system.cpuSources)
     private var srcProc = false
@@ -280,7 +281,16 @@ class DataCollector(val context: Context) {
         if (now - cpuAt < 500 && cpuSource != "none") return
         cpuAt = now
 
-        val proc = readProcStat()
+        var proc = readProcStat()
+        if (proc == null && RootFeatures.isEnabled(context, "cpu_detail")) {
+            val st = RootManager.checkRootStatus(context)
+            if (st == RootManager.RootStatus.MAGISK_GRANTED || st == RootManager.RootStatus.GENERIC_SU) {
+                // Throttle: su lebih mahal dari baca file; sampel tiap >= 2 detik, di antaranya pakai nilai terakhir
+                if (cpuSource == "proc" && now - cpuRootAt < 2000) return
+                cpuRootAt = now
+                proc = parseProcStatLine(RootManager.readProcStatLineRoot())
+            }
+        }
         srcProc = proc != null
         var fromProc: Double? = null
         if (proc != null) {
@@ -354,7 +364,15 @@ class DataCollector(val context: Context) {
 
     private fun readProcStat(): Pair<Long, Long>? {
         return try {
-            val line = File("/proc/stat").bufferedReader().use { it.readLine() } ?: return null
+            parseProcStatLine(File("/proc/stat").bufferedReader().use { it.readLine() })
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseProcStatLine(line: String?): Pair<Long, Long>? {
+        if (line == null) return null
+        return try {
             val parts = line.trim().split(Regex("\\s+"))
             if (parts.size < 5 || parts[0] != "cpu") return null
             val nums = parts.drop(1).take(8).map { it.toLong() }
@@ -606,12 +624,8 @@ class DataCollector(val context: Context) {
                     put("cpu", RootManager.getCpuDetails())
                     RootManager.getGpuFreq()?.let { put("gpu", it) }
                 }
-                if (RootFeatures.isEnabled(context, "foreground_app")) {
-                    put("fgapp", RootManager.getForegroundApp())
-                }
-                if (RootFeatures.isEnabled(context, "ui_dump")) {
-                    RootManager.getUiDump()?.let { put("uidump", it) }
-                }
+                // fgapp & uidump TIDAK diambil periodik: keduanya berat (dumpsys / uiautomator via su tiap interval
+                // membuat CPU & suhu naik). Dashboard mengambilnya on-demand: /api/root/fgapp dan /api/root/uidump.
                 // Data opsional (lebih berat, di-load on-demand via endpoint terpisah)
                 put("hasProcessList", RootFeatures.isEnabled(context, "process_list"))
                 put("hasNetworkConnections", RootFeatures.isEnabled(context, "network_detail"))

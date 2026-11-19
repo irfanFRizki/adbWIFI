@@ -149,6 +149,10 @@ object RootManager {
         return output?.let { android.util.Base64.encodeToString(it.toByteArray(), android.util.Base64.NO_WRAP) }
     }
 
+    /** Baris agregat "cpu ..." dari /proc/stat via root (app biasa diblokir SELinux di Android 8+). */
+    fun readProcStatLineRoot(): String? =
+        executeRootCommandBlocking("head -n 1 /proc/stat")?.lineSequence()?.firstOrNull { it.startsWith("cpu ") }
+
     /** Aplikasi foreground akurat via dumpsys window/activity. */
     fun getForegroundApp(): JSONObject? {
         val output = executeRootCommandBlocking("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' | head -1")
@@ -202,7 +206,8 @@ object RootManager {
             // current_now biasanya dalam µA, ubah ke mA
             currentNow?.let { put("currentMa", (it.toLong() / 1000)) }
             currentAvg?.let { put("currentAvgMa", (it.toLong() / 1000)) }
-            voltageNow?.let { put("voltageMv", it.toLong()) }
+            // voltage_now umumnya dalam µV (mis. 3818388); beberapa perangkat sudah mV
+            voltageNow?.toLongOrNull()?.let { put("voltageMv", if (it > 100_000L) it / 1000 else it) }
             capacityNow?.let { put("level", it.toInt()) }
             capacityDesign?.let { put("designCapacityMah", (it.toLong() / 1000)) }
             capacityFull?.let { put("fullCapacityMah", (it.toLong() / 1000)) }
