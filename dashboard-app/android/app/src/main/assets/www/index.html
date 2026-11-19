@@ -23,7 +23,10 @@
 
 <div id="banner" class="banner hidden" role="status"></div>
 
+<nav class="dev-strip" id="devStrip" aria-label="Daftar HP yang dipantau"></nav>
+
 <main class="dashboard">
+  <div class="dev-heading mono" id="devHeading"></div>
   <div class="grid grid-2">
     <section class="card card-battery" id="cardBattery">
       <div class="card-head"><h3>Baterai</h3><span class="chip" id="chipBatStatus">—</span></div>
@@ -65,8 +68,15 @@
   </div>
 
   <section class="card card-raw full">
-    <div class="card-head"><h3>Data Mentah (JSON)</h3><button class="btn ghost small" id="btnCopyJson">Salin</button></div>
-    <pre id="rawJson" class="raw-json">—</pre>
+    <div class="card-head">
+      <h3>Data Mentah (JSON)</h3>
+      <div class="head-btns">
+        <button type="button" class="btn ghost small" id="btnToggleRaw" aria-controls="rawJson" aria-expanded="false">Tampilkan</button>
+        <button type="button" class="btn ghost small" id="btnCopyJson">Salin</button>
+      </div>
+    </div>
+    <p class="hint raw-hidden" id="rawHidden">Data mentah disembunyikan. Tombol Salin tetap menyalin JSON terbaru dari HP yang dipilih.</p>
+    <pre id="rawJson" class="raw-json hidden">—</pre>
   </section>
 </main>
 
@@ -74,14 +84,21 @@
   <div class="scrim" data-close></div>
   <form class="sheet" id="formSettings" autocomplete="off" novalidate>
     <div class="sheet-head">
-      <div><h2>Koneksi ke Server</h2><p class="sub mono" id="verLabel"></p></div>
+      <div><h2>Kelola HP Target</h2><p class="sub mono" id="verLabel"></p></div>
       <button type="button" class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
     </div>
     <div class="sheet-body">
+      <div class="section-title">HP yang dipantau</div>
+      <div id="deviceList" class="dev-list"></div>
+
+      <div class="section-title" id="formTitle">Tambah HP Target</div>
+      <label class="field"><span>Nama (opsional, mis. HP Aqilla)</span><input id="setName" type="text" maxlength="40" placeholder="Kosongkan untuk pakai nama model HP"></label>
       <label class="field"><span>IP Server (HP Target)</span><input id="setServerIp" type="text" placeholder="192.168.x.x" autocapitalize="off" spellcheck="false"></label>
       <label class="field"><span>Port WebSocket (lihat di aplikasi Server)</span><input id="setPort" inputmode="numeric" value="8765"></label>
       <label class="field"><span>Token API (Bearer)</span><div class="row"><input id="setToken" type="password" autocapitalize="off" spellcheck="false"><button type="button" class="btn ghost small" id="tokenToggle">Lihat</button></div></label>
-      <p class="hint">Pastikan HP Target dan HP Pantau di jaringan yang sama (WiFi/LAN/Tailscale).</p>
+      <p class="hint">Pastikan HP Target dan HP Pantau di jaringan yang sama (WiFi/LAN/Tailscale). Tiap HP punya IP, port, dan token sendiri.</p>
+      <p class="form-error hidden" id="setMsg"></p>
+
       <div class="field">
         <span>Pembaruan Aplikasi</span>
         <div class="row">
@@ -89,10 +106,10 @@
           <button type="button" class="btn ghost small" id="btnCheckUpdate">Cek Update</button>
         </div>
       </div>
-      <p class="form-error hidden" id="setMsg"></p>
     </div>
     <div class="sheet-foot">
-      <button type="submit" class="btn primary">Hubungkan</button>
+      <button type="button" class="btn ghost hidden" id="btnCancelEdit">Batal ubah</button>
+      <button type="submit" class="btn primary" id="btnSaveDevice">Tambah &amp; Hubungkan</button>
     </div>
   </form>
 </div>
