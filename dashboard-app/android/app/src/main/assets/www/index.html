@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0e1116">
 <meta name="color-scheme" content="dark">
-<title>Telemetry Server</title>
+<title>Telemetry Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -14,9 +14,8 @@
 <body>
 
 <header class="top">
-  <div class="brand"><span class="pulse" id="pulse"></span><h1>Telemetry Server</h1></div>
+  <div class="brand"><span class="pulse" id="pulse"></span><h1>Telemetry Dashboard</h1></div>
   <div class="top-actions">
-    <select class="device-selector" id="deviceSelector" aria-label="Pilih perangkat" style="display:none;"></select>
     <button class="icon-btn" id="btnRefresh" aria-label="Segarkan">&#8635;</button>
     <button class="icon-btn" id="btnSettings" aria-label="Pengaturan">&#9881;</button>
   </div>
@@ -26,16 +25,17 @@
 
 <main class="dashboard">
   <div class="grid grid-2">
-    <section class="card card-battery">
+    <section class="card card-battery" id="cardBattery">
       <div class="card-head"><h3>Baterai</h3><span class="chip" id="chipBatStatus">—</span></div>
-      <div class="big"> <span id="valBatLevel" class="big-val">—</span><span class="big-unit">%</span></div>
+      <div class="big"><span class="bolt" id="bolt" aria-hidden="true">&#9889;</span><span id="valBatLevel" class="big-val">—</span><span class="big-unit">%</span></div>
       <div class="mini-row"><span id="valBatTemp">—</span><span id="valBatVolt">—</span><span id="valBatCurr">—</span></div>
-      <div class="bar-wrap"><div class="bar-label">Pengisian</div><div class="bar"><i id="barBat" style="width:0%"></i></div></div>
+      <div class="bar-wrap"><div class="bar-label">Level</div><div class="bar"><i id="barBat" style="width:0%"></i></div></div>
       <div class="foot mono" id="footBat"></div>
     </section>
 
     <section class="card card-location">
       <div class="card-head"><h3>Lokasi</h3><span class="chip ok" id="chipLoc">—</span></div>
+      <div class="street" id="valStreet">Menunggu lokasi...</div>
       <div class="coord-row"><span id="valLat">—</span><span id="valLon">—</span></div>
       <div class="mini-row"><span id="valAcc">—</span><span id="valAlt">—</span><span id="valProv">—</span></div>
       <div class="foot mono" id="footLoc"></div>
@@ -46,8 +46,8 @@
     <section class="card card-system">
       <div class="card-head"><h3>Sistem</h3><span class="chip" id="chipSys">—</span></div>
       <div class="mini-row"><span id="valRam">—</span><span id="valCpu">—</span><span id="valScreen">—</span></div>
-      <div class="bar-wrap"><div class="bar-label">RAM</div><div class="bar"><i id="barRam" style="width:0%"></i></div></div>
-      <div class="bar-wrap"><div class="bar-label">CPU</div><div class="bar"><i id="barCpu" style="width:0%"></i></div></div>
+      <div class="bar-wrap"><div class="bar-label" id="lblRam">RAM</div><div class="bar"><i id="barRam" style="width:0%"></i></div></div>
+      <div class="bar-wrap"><div class="bar-label" id="lblCpu">CPU</div><div class="bar"><i id="barCpu" style="width:0%"></i></div></div>
       <div class="foot mono" id="footSys"></div>
     </section>
 
@@ -60,19 +60,13 @@
     <section class="card card-apps">
       <div class="card-head"><h3>Aplikasi Aktif</h3><span class="chip" id="chipApps">—</span></div>
       <ul id="listApps" class="app-list"></ul>
-      <div class="foot mono" id="footApps">Data belum tersedia</div>
+      <div class="foot mono" id="footApps">Menunggu data dari server...</div>
     </section>
   </div>
 
   <section class="card card-raw full">
-    <div class="card-head">
-      <h3>Data Mentah (JSON)</h3>
-      <div class="card-head-actions">
-        <button class="btn ghost small" id="btnToggleRaw" aria-label="Tampilkan/Sembunyikan JSON">Tampilkan</button>
-        <button class="btn ghost small" id="btnCopyJson" aria-label="Salin JSON">Salin</button>
-      </div>
-    </div>
-    <pre id="rawJson" class="raw-json hidden">—</pre>
+    <div class="card-head"><h3>Data Mentah (JSON)</h3><button class="btn ghost small" id="btnCopyJson">Salin</button></div>
+    <pre id="rawJson" class="raw-json">—</pre>
   </section>
 </main>
 
@@ -80,65 +74,27 @@
   <div class="scrim" data-close></div>
   <form class="sheet" id="formSettings" autocomplete="off" novalidate>
     <div class="sheet-head">
-      <div><h2>Pengaturan Server</h2><p class="sub mono" id="verLabel"></p></div>
+      <div><h2>Koneksi ke Server</h2><p class="sub mono" id="verLabel"></p></div>
       <button type="button" class="icon-btn" data-close aria-label="Tutup">&#10005;</button>
     </div>
     <div class="sheet-body">
-      <label class="field"><span>Port HTTP</span><input id="setPort" inputmode="numeric" value="8080"></label>
-      <label class="field"><span>Port WebSocket</span><input id="setWsPort" inputmode="numeric" value="8081"></label>
+      <label class="field"><span>IP Server (HP Target)</span><input id="setServerIp" type="text" placeholder="192.168.x.x" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>Port WebSocket (lihat di aplikasi Server)</span><input id="setPort" inputmode="numeric" value="8765"></label>
       <label class="field"><span>Token API (Bearer)</span><div class="row"><input id="setToken" type="password" autocapitalize="off" spellcheck="false"><button type="button" class="btn ghost small" id="tokenToggle">Lihat</button></div></label>
-      <label class="field"><span>Izinkan akses dari semua IP</span><select id="setBind"><option value="0">Hanya localhost</option><option value="1">Semua antarmuka</option></select></label>
-      <label class="field"><span>Interval broadcast (detik)</span><select id="setInterval"><option value="1">1</option><option value="2">2</option><option value="5">5</option><option value="10">10</option><option value="30">30</option></select></label>
-      <p class="hint">Server berjalan di foreground dengan notifikasi. Matikan notifikasi = server berhenti (Android batasi background).</p>
+      <p class="hint">Pastikan HP Target dan HP Pantau di jaringan yang sama (WiFi/LAN/Tailscale).</p>
+      <div class="field">
+        <span>Pembaruan Aplikasi</span>
+        <div class="row">
+          <input id="updStatus" type="text" value="Belum dicek" readonly tabindex="-1">
+          <button type="button" class="btn ghost small" id="btnCheckUpdate">Cek Update</button>
+        </div>
+      </div>
       <p class="form-error hidden" id="setMsg"></p>
     </div>
     <div class="sheet-foot">
-      <button type="button" class="btn ghost" id="btnStartServer">Mulai Server</button>
-      <button type="button" class="btn ghost" id="btnStopServer">Hentikan Server</button>
-      <button type="button" class="btn ghost" id="btnQuickConnect">Koneksi ke Server</button>
-      <button type="button" class="btn ghost" id="btnManageDevices">Kelola Perangkat</button>
-      <button type="button" class="btn ghost" id="btnCheckUpdate">Cek Update</button>
-      <button type="submit" class="btn primary">Simpan</button>
+      <button type="submit" class="btn primary">Hubungkan</button>
     </div>
   </form>
-</div>
-
-<div id="layerQuickConnect" class="layer hidden">
-  <div class="scrim" data-close></div>
-  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="qcTitle">
-    <div class="sheet-head"><div><h2 id="qcTitle">Koneksi ke Server</h2><p class="sub mono">Masukkan IP dan port WebSocket server telemetry</p></div><button class="icon-btn" data-close aria-label="Tutup">&#10005;</button></div>
-    <div class="sheet-body">
-      <label class="field"><span>IP / Hostname Server</span><input id="qcHost" placeholder="mis. 192.168.1.50" required></label>
-      <label class="field"><span>Port WebSocket</span><input id="qcWsPort" inputmode="numeric" value="8765" required></label>
-      <label class="field"><span>Token API (Bearer)</span><div class="row"><input id="qcToken" type="password" autocapitalize="off" spellcheck="false"><button type="button" class="btn ghost small" id="qcTokenToggle">Lihat</button></div></label>
-      <p class="hint">Pastikan HP ini dan server berada di jaringan yang sama (Wi-Fi/LAN/Tailscale).</p>
-    </div>
-    <div class="sheet-foot">
-      <button type="button" class="btn primary" id="btnQuickConnectGo">Hubungkan</button>
-      <button type="button" class="btn ghost" data-close>Batal</button>
-    </div>
-  </section>
-</div>
-
-<div id="layerDevices" class="layer hidden">
-  <div class="scrim" data-close></div>
-  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="devTitle">
-    <div class="sheet-head"><div><h2 id="devTitle">Kelola Perangkat</h2><p class="sub mono">Tambah, hapus, atau pilih server telemetry</p></div><button class="icon-btn" data-close aria-label="Tutup">&#10005;</button></div>
-    <div id="devBody" class="sheet-body">
-      <div class="devices-list" id="devicesList"></div>
-      <hr style="margin:16px 0; border:none; border-top:1px solid var(--border);">
-      <h4>Tambah Perangkat Baru</h4>
-      <form id="formAddDevice" autocomplete="off" novalidate>
-        <label class="field"><span>Nama Perangkat</span><input id="addDevName" placeholder="mis. HP Kantor, HP Rumah" required></label>
-        <label class="field"><span>IP / Hostname Server</span><input id="addDevHost" placeholder="mis. 192.168.1.50 atau telemetry.local" required></label>
-        <label class="field"><span>Port HTTP</span><input id="addDevPort" inputmode="numeric" value="8080" required></label>
-        <label class="field"><span>Port WebSocket</span><input id="addDevWsPort" inputmode="numeric" value="8765" required></label>
-        <label class="field"><span>Token API (Bearer)</span><div class="row"><input id="addDevToken" type="password" autocapitalize="off" spellcheck="false"><button type="button" class="btn ghost small" id="addDevTokenToggle">Lihat</button></div></label>
-        <button type="submit" class="btn primary">Simpan Perangkat</button>
-      </form>
-    </div>
-    <div class="sheet-foot"><button class="btn ghost" data-close>Selesai</button></div>
-  </section>
 </div>
 
 <div id="layerDetail" class="layer hidden">
@@ -154,7 +110,6 @@
 
 <script src="version.js"></script>
 <script src="update-checker.js"></script>
-<script src="lib.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
