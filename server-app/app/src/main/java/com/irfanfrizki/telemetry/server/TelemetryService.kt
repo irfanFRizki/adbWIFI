@@ -349,7 +349,7 @@ class TelemetryService : Service() {
                 val value = req.optString("value", "")
                 val args = req.optJSONObject("args") ?: JSONObject()
                 if (!checkRootFeature("remote_control")) return rootDenied("remote_control")
-                if (!RootManager.getRootInfo(sContext ?: this@TelemetryService).optBoolean("hasAccess")) {
+                if (!RootManager.getRootInfo(sContext).optBoolean("hasAccess")) {
                     return jsonResponse(Response.Status.FORBIDDEN, JSONObject().put("error", "root access unavailable").toString())
                 }
 
@@ -460,7 +460,7 @@ class TelemetryService : Service() {
                 "/api/apps" -> collector.collect().optJSONArray("apps")?.let { JSONObject().put("apps", it) }
                 // ---- Root-only endpoints ----
                 "/api/root/status" -> collector.collect().optJSONObject("root") ?: JSONObject().put("available", false)
-                "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(sContext ?: this@TelemetryService))
+                "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(sContext))
                 "/api/root/features/update" -> JSONObject().put("error", "Use POST /api/root/features/update")
                 "/api/root/screenshot" -> if (!checkRootFeature("screenshot")) rootDenied("screenshot") else JSONObject().apply {
                     val b64 = RootManager.takeScreenshot()
