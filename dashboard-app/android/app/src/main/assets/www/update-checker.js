@@ -1,31 +1,35 @@
 /* ============================================================
    update-checker.js — Cek & pasang update APK Dashboard dari
-   GitHub Releases (repo PUBLIC), lewat jembatan native Android.
+   GitHub Releases (repo PUBLIC) lewat jembatan native Android.
 
-   Jembatan native (dipasang MainActivity):
-     window.AndroidUpdate.checkUpdate()
-     window.AndroidUpdate.downloadAndInstall(url, version, fileName)
-
-   Native melapor status balik ke window._onUpdateStatus(status):
-     { state: 'checking'|'update-available'|'downloading'|
-              'up-to-date'|'error',
-       phase, message, progress, version, latestVersion,
-       currentVersion, downloadUrl }
+   Native (MainActivity -> UpdateBridge) menyediakan:
+     AndroidUpdate.currentVersion()
+     AndroidUpdate.checkUpdate()
+     AndroidUpdate.downloadAndInstall(url, version, fileName)
+   Native melapor balik ke window._onUpdateStatus(status):
+     { state: 'checking'|'update-available'|'downloading'|'up-to-date'|'error',
+       phase, message, progress, version, latestVersion, currentVersion, downloadUrl }
+   UI (app.js) boleh memasang window.onUpdateStatusUI(status) untuk ikut mendengar.
    ============================================================ */
 (function () {
-  var CURRENT_VERSION =
-    (window.APP_VERSION && String(window.APP_VERSION).indexOf('__APP') === -1)
-      ? window.APP_VERSION
-      : '__APP_VERSION__';
-  window.APP_CURRENT_VERSION = CURRENT_VERSION;
-
   function nativeBridge() {
     return (typeof window.AndroidUpdate !== 'undefined') ? window.AndroidUpdate : null;
   }
 
-  function report(status) {
-    if (typeof window._onUpdateStatus === 'function') {
-      try { window._onUpdateStatus(status); } catch (e) {}
+  // Versi terpasang = versionName APK (sumber tepercaya), fallback ke version.js.
+  (function resolveVersion() {
+    var v = '';
+    try { var b = nativeBridge(); if (b && b.currentVersion) v = String(b.currentVersion() || ''); } catch (e) {}
+    if (!v && window.APP_VERSION && String(window.APP_VERSION).indexOf('__APP') === -1) v = window.APP_VERSION;
+    window.APP_CURRENT_VERSION = v || '?';
+  })();
+
+  var silent = false;     // true untuk cek otomatis saat start (tanpa banner error)
+  var lastVersion = '';
+
+  function notifyUI(status) {
+    if (typeof window.onUpdateStatusUI === 'function') {
+      try { window.onUpdateStatusUI(status); } catch (e) {}
     }
   }
 
@@ -56,83 +60,73 @@
     document.getElementById('apkUpdateBtn').addEventListener('click', function () {
       var bridge = nativeBridge();
       if (!bridge) return;
-      var fileName = 'TelemetryDashboard-v' + version + '.apk';
-      bridge.downloadAndInstall(downloadUrl, version, fileName);
+      silent = false; // setelah user menekan Install, semua error harus terlihat
+      bridge.downloadAndInstall(downloadUrl, version, 'TelemetryDashboard-v' + version + '.apk');
       el.querySelector('span').textContent = 'Mengunduh update v' + version + '…';
+      var btn = document.getElementById('apkUpdateBtn');
+      if (btn) btn.remove();
     });
   }
 
   function showProgressBanner(pct, version) {
     var el = document.getElementById('apkUpdateBanner');
-    if (!el) {
-      el = makeBanner('#1d4ed8',
-        '<span style="flex:1;min-width:0;">Mengunduh update v' + version + '…</span>');
-    }
+    if (!el) el = makeBanner('#1d4ed8', '<span style="flex:1;min-width:0;"></span>');
     var span = el.querySelector('span');
     if (span) span.textContent = 'Mengunduh update v' + version + '… ' + pct + '%';
   }
 
-  function showErrorBanner(message, onRetryClick) {
-    var el = makeBanner('#b91c1c',
-      '<span style="flex:1;min-width:0;">Cek update gagal: ' + message + '</span>' +
+  function showErrorBanner(message) {
+    makeBanner('#b91c1c',
+      '<span style="flex:1;min-width:0;">Update gagal: ' + message + '</span>' +
       '<button id="apkRetryBtn" style="background:#fff;color:#b91c1c;border:none;' +
       'padding:8px 14px;border-radius:6px;font-weight:600;flex-shrink:0;">Coba Lagi</button>');
     document.getElementById('apkRetryBtn').addEventListener('click', function () {
       removeBanner();
-      onRetryClick();
+      checkForUpdate(false);
     });
   }
 
-  function checkForUpdate() {
+  function checkForUpdate(isSilent) {
+    silent = !!isSilent;
     var bridge = nativeBridge();
     if (!bridge) {
-      report({ state: 'error', phase: 'cek-versi',
+      notifyUI({ state: 'error', phase: 'cek-versi',
         message: 'Cek update hanya berjalan di dalam APK, bukan browser.' });
       return;
     }
-    report({ state: 'checking' });
+    notifyUI({ state: 'checking' });
     removeBanner();
     try {
       bridge.checkUpdate();
     } catch (err) {
       var msg = (err && err.message) ? err.message : String(err);
-      report({ state: 'error', phase: 'cek-versi', message: msg });
-      showErrorBanner(msg, checkForUpdate);
+      notifyUI({ state: 'error', phase: 'cek-versi', message: msg });
+      if (!silent) showErrorBanner(msg);
     }
   }
 
-  // Handler status dari native
-  var lastVersion = '';
+  // Dipanggil native (evaluateJavascript) untuk melapor status.
   window._onUpdateStatus = function (status) {
     status = status || {};
     switch (status.state) {
-      case 'checking':
-        break;
-
       case 'up-to-date':
         removeBanner();
-        report(status);
         break;
-
       case 'update-available':
         lastVersion = status.version || status.latestVersion || '';
-        report(status);
         showUpdateBanner(lastVersion, status.downloadUrl);
         break;
-
       case 'downloading':
         showProgressBanner(status.progress || 0, lastVersion);
-        report(status);
         break;
-
       case 'error':
-        report(status);
-        showErrorBanner(status.message || 'kesalahan tidak diketahui', checkForUpdate);
+        // Cek otomatis saat start: jangan ganggu user kalau cuma gagal cek.
+        if (!silent || status.phase === 'download' || status.phase === 'install') {
+          showErrorBanner(status.message || 'kesalahan tidak diketahui');
+        }
         break;
-
-      default:
-        report(status);
     }
+    notifyUI(status);
   };
 
   window.checkForTelemetryUpdate = checkForUpdate;

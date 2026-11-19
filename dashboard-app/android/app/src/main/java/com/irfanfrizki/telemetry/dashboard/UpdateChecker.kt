@@ -205,6 +205,9 @@ class UpdateBridge(
     }
 
     @JavascriptInterface
+    fun currentVersion(): String = checker.currentVersion()
+
+    @JavascriptInterface
     fun checkUpdate() {
         checker.check(silent = false) { release ->
             if (release == null) {
