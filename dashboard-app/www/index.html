@@ -100,17 +100,29 @@
     </div>
 
     <div class="grid grid-2">
-      <section class="card card-root-screen">
-        <div class="card-head">
-          <h3>Screenshot Layar</h3>
-          <div class="head-btns">
-            <button type="button" class="btn ghost small" data-action="screenshot">Ambil</button>
-          </div>
-        </div>
-        <div class="shot-wrap" id="shotWrap"><span class="hint">Tekan Ambil untuk screenshot (butuh fitur Screenshot aktif).</span></div>
-      </section>
+          <section class="card card-root-screen">
+            <div class="card-head">
+              <h3>Screenshot Layar</h3>
+              <div class="head-btns">
+                <button type="button" class="btn ghost small" data-action="screenshot">Ambil</button>
+              </div>
+            </div>
+            <div class="shot-wrap" id="shotWrap"><span class="hint">Tekan Ambil untuk screenshot (butuh fitur Screenshot aktif).</span></div>
+          </section>
 
-      <section class="card card-root-fg">
+          <section class="card card-root-uidump">
+            <div class="card-head">
+              <h3>Teks di Layar (UI Dump)</h3>
+              <div class="head-btns">
+                <button type="button" class="btn ghost small" data-action="loaduidump">Muat</button>
+              </div>
+            </div>
+            <pre id="listRootUidump" class="raw-json scroll">—</pre>
+            <div class="foot mono" id="footRootUidump"></div>
+          </section>
+        </div>
+
+        <section class="card card-root-fg">
         <div class="card-head">
           <h3>Aplikasi Aktif (root)</h3>
           <div class="head-btns">

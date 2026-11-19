@@ -92,7 +92,9 @@
     listRootCpu: $('#listRootCpu'),
     footRootCpu: $('#footRootCpu'),
     shotWrap: $('#shotWrap'),
-    listRootFg: $('#listRootFg'),
+        listRootUidump: $('#listRootUidump'),
+        footRootUidump: $('#footRootUidump'),
+        listRootFg: $('#listRootFg'),
     footRootFg: $('#footRootFg'),
     listRootProcs: $('#listRootProcs'),
     listRootNet: $('#listRootNet'),
@@ -522,6 +524,7 @@
       ['.card-root-thermal', 'thermal'],
       ['.card-root-cpu', 'cpu_detail'],
       ['.card-root-screen', 'screenshot'],
+      ['.card-root-uidump', 'ui_dump'],
       ['.card-root-fg', 'foreground_app'],
       ['.card-root-procs', 'process_list'],
       ['.card-root-net', 'network_detail'],
@@ -610,6 +613,18 @@
       img.style.border = '1px solid var(--border)';
       if (els.shotWrap) { els.shotWrap.innerHTML = ''; els.shotWrap.appendChild(img); }
     }
+  }
+
+  async function onLoadUiDump(dev, c) {
+    if (!dev) return;
+    if (els.listRootUidump) els.listRootUidump.innerHTML = '<span class="hint">Memuat...</span>';
+    const res = await fetchRoot(dev, '/api/root/uidump');
+    if (!res) { if (els.listRootUidump) els.listRootUidump.innerHTML = '<span class="hint">Gagal</span>'; return; }
+    if (els.listRootUidump) {
+      if (res.uidump) els.listRootUidump.innerHTML = `<pre class="raw-json">${esc(res.uidump)}</pre>`;
+      else els.listRootUidump.innerHTML = '<span class="hint">Tidak ada data</span>';
+    }
+    if (els.footRootUidump) els.footRootUidump.textContent = 'uiautomator dump';
   }
 
   async function onLoadFgApp(dev, c) {
@@ -1126,13 +1141,14 @@
       if (!dev || !c) return;
 
       const actBtn = e.target.closest('[data-action]');
-      if (actBtn) {
-        const act = actBtn.getAttribute('data-action');
-        if (act === 'loadprocs') { onLoadProcs(dev, c); return; }
-        if (act === 'loadnet') { onLoadNet(dev, c); return; }
-        if (act === 'loadfg') { onLoadFgApp(dev, c); return; }
-        if (act === 'screenshot') { onScreenshot(dev, c); return; }
-      }
+            if (actBtn) {
+              const act = actBtn.getAttribute('data-action');
+              if (act === 'loadprocs') { onLoadProcs(dev, c); return; }
+              if (act === 'loadnet') { onLoadNet(dev, c); return; }
+              if (act === 'loadfg') { onLoadFgApp(dev, c); return; }
+              if (act === 'screenshot') { onScreenshot(dev, c); return; }
+              if (act === 'loaduidump') { onLoadUiDump(dev, c); return; }
+            }
 
       const ctlBtn = e.target.closest('[data-ctl]');
       if (ctlBtn) {
