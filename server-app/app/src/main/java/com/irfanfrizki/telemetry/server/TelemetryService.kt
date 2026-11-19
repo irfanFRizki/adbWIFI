@@ -449,63 +449,26 @@ class TelemetryService : Service() {
                     </body></html>
                 """.trimIndent()
                 return withCors(newFixedLengthResponse(Response.Status.OK, MIME_HTML, html))
-                            }
+            }
 
-                            val rootFeature = when (path) {
-                                "/api/root/screenshot" -> "screenshot"
-                                "/api/root/fgapp" -> "foreground_app"
-                                "/api/root/uidump" -> "ui_dump"
-                                "/api/root/proclist" -> "process_list"
-                                "/api/root/netconn", "/api/root/arp" -> "network_detail"
-                                "/api/root/uidstats" -> "data_usage"
-                                "/api/root/calllog", "/api/root/sms", "/api/root/appsizes" -> "sensitive_data"
-                                "/api/root/battery" -> "battery_detail"
-                                "/api/root/thermal" -> "thermal"
-                                "/api/root/cpu", "/api/root/gpu" -> "cpu_detail"
-                                else -> null
-                            }
-                            if (rootFeature != null && !checkRootFeature(rootFeature)) {
-                                return rootDenied(rootFeature)
-                            }
-
-                            val responseJson: JSONObject? = when (path) {
-                "/api/data", "/api/all" -> collector.collect()
-                "/api/battery" -> collector.collect().optJSONObject("battery")
-                "/api/location" -> collector.collect().optJSONObject("location")
-                "/api/system" -> collector.collect().optJSONObject("system")
-                "/api/network" -> collector.collect().optJSONObject("network")
-                "/api/apps" -> collector.collect().optJSONArray("apps")?.let { JSONObject().put("apps", it) }
-                "/api/root/status" -> collector.collect().optJSONObject("root") ?: JSONObject().put("available", false)
-                "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(sContext))
-                "/api/root/features/update" -> JSONObject().put("error", "Use POST /api/root/features/update")
-                "/api/root/screenshot" -> JSONObject().apply {
-                    val b64 = RootManager.takeScreenshot()
-                    put("screenshot", b64 ?: JSONObject.NULL)
-                    put("ok", b64 != null)
-                }
-                "/api/root/fgapp" -> RootManager.getForegroundApp()
-                "/api/root/uidump" -> RootManager.getUiDump()?.let { JSONObject().put("uidump", it) }
-                "/api/root/proclist" -> RootManager.getProcessList().let { JSONObject().put("procs", it) }
-                "/api/root/netconn" -> JSONObject().put("connections", RootManager.getNetworkConnections())
-                "/api/root/arp" -> JSONObject().put("arp", RootManager.getArpTable())
-                "/api/root/uidstats" -> JSONObject().put("stats", RootManager.getUidNetworkStats())
-                "/api/root/calllog" -> JSONObject().put("calls", RootManager.getCallLog())
-                "/api/root/sms" -> JSONObject().put("messages", RootManager.getSms())
-                "/api/root/appsizes" -> JSONObject().put("apps", RootManager.getInstalledAppsWithSize())
-                "/api/root/battery" -> RootManager.getBatteryCurrent()
-                "/api/root/thermal" -> JSONObject().put("thermal", RootManager.getThermalSensors())
-                "/api/root/cpu" -> RootManager.getCpuDetails()
-                "/api/root/gpu" -> JSONObject().put("gpu", RootManager.getGpuFreq())
-                "/status" -> JSONObject().put("status", "ok").put("uptime", System.currentTimeMillis() - startTime)
+            val rootFeature = when (path) {
+                "/api/root/screenshot" -> "screenshot"
+                "/api/root/fgapp" -> "foreground_app"
+                "/api/root/uidump" -> "ui_dump"
+                "/api/root/proclist" -> "process_list"
+                "/api/root/netconn", "/api/root/arp" -> "network_detail"
+                "/api/root/uidstats" -> "data_usage"
+                "/api/root/calllog", "/api/root/sms", "/api/root/appsizes" -> "sensitive_data"
+                "/api/root/battery" -> "battery_detail"
+                "/api/root/thermal" -> "thermal"
+                "/api/root/cpu", "/api/root/gpu" -> "cpu_detail"
                 else -> null
             }
-
-            return if (responseJson != null) {
-                jsonResponse(Response.Status.OK, responseJson.toString(2))
-            } else {
-                jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "not found").toString())
+            if (rootFeature != null && !checkRootFeature(rootFeature)) {
+                return rootDenied(rootFeature)
             }
-        }
+
+            val responseJson: JSONObject? = when (path) {
 
         private fun checkRootFeature(feature: String): Boolean {
             return try {
