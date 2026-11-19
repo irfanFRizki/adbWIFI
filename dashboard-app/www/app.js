@@ -74,6 +74,10 @@
     listApps: $('#listApps'),
     footApps: $('#footApps'),
 
+    chipBgApps: $('#chipBgApps'),
+    listBgApps: $('#listBgApps'),
+    footBgApps: $('#footBgApps'),
+
     rawJson: $('#rawJson'),
     rawHidden: $('#rawHidden'),
     btnCopyJson: $('#btnCopyJson'),
@@ -213,6 +217,34 @@
     if (els.footApps) els.footApps.textContent = fg ? `Sedang dibuka: ${fg.name || fg.package}` : `${apps.length} aplikasi terakhir dipakai`;
   }
 
+  function renderBackgroundApps(apps, perms) {
+    if (!els.listBgApps) return;
+    if (perms && perms.usage === false) {
+      els.listBgApps.innerHTML = '';
+      setChip(els.chipBgApps, 'Izin belum diberikan', 'warn');
+      if (els.footBgApps) els.footBgApps.textContent = 'Di HP Target: buka aplikasi Server, tekan "Beri Izin", lalu aktifkan Akses Penggunaan untuk Telemetry Server.';
+      return;
+    }
+    if (!apps || !apps.length) {
+      els.listBgApps.innerHTML = '';
+      setChip(els.chipBgApps, '—', '');
+      if (els.footBgApps) els.footBgApps.textContent = 'Tidak ada aplikasi yang berpindah ke latar belakang baru-baru ini.';
+      return;
+    }
+    setChip(els.chipBgApps, `${apps.length} aplikasi`, 'ok');
+    els.listBgApps.innerHTML = apps.map((a) => `
+      <li>
+        <span class="app-icon">${esc((a.name || a.package || '?')[0].toUpperCase())}</span>
+        <div class="app-info">
+          <div class="app-name">${esc(a.name || a.package)}</div>
+          <div class="app-pkg">${esc(a.package)}</div>
+        </div>
+        <span class="app-time">${a.minutesAgo} menit lalu</span>
+      </li>
+    `).join('');
+    if (els.footBgApps) els.footBgApps.textContent = `${apps.length} aplikasi berjalan di latar belakang`;
+  }
+
   // ----- Nama jalan (reverse geocoding OpenStreetMap/Nominatim, perlu internet di HP Pantau) -----
   // Hanya dijalankan untuk HP yang sedang dipilih, jadi kebijakan Nominatim (±1 permintaan/detik) tetap aman.
   function distM(lat1, lon1, lat2, lon2) {
@@ -277,9 +309,12 @@
     [els.valBatLevel, els.valBatTemp, els.valBatVolt, els.valBatCurr, els.valLat, els.valLon, els.valAcc, els.valAlt,
       els.valProv, els.valRam, els.valCpu, els.valScreen, els.valWifi, els.valIp, els.valRssi].forEach(dash);
     ['chipBatStatus', 'chipLoc', 'chipSys', 'chipNet', 'chipApps'].forEach((k) => setChip(els[k], '—', ''));
+    ['chipBatStatus', 'chipLoc', 'chipSys', 'chipNet', 'chipApps', 'chipBgApps'].forEach((k) => setChip(els[k], '—', ''));
     [els.footBat, els.footLoc, els.footSys, els.footNet].forEach((el) => { if (el) el.textContent = ''; });
     if (els.footApps) els.footApps.textContent = 'Menunggu data dari server...';
+    if (els.footBgApps) els.footBgApps.textContent = 'Menunggu data dari server...';
     if (els.listApps) els.listApps.innerHTML = '';
+    if (els.listBgApps) els.listBgApps.innerHTML = '';
     if (els.lblRam) els.lblRam.textContent = 'RAM';
     if (els.lblCpu) els.lblCpu.textContent = 'CPU';
     [els.barBat, els.barRam, els.barCpu].forEach((el) => { if (el) { el.style.width = '0%'; el.className = ''; } });
@@ -394,6 +429,8 @@
     }
 
     if (data.apps) renderApps(data.apps, data.permissions);
+
+    if (data.backgroundApps) renderBackgroundApps(data.backgroundApps, data.permissions);
 
     renderRaw();
   }

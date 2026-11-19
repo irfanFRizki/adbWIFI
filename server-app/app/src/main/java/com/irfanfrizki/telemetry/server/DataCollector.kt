@@ -91,6 +91,7 @@ class DataCollector(private val context: Context) {
                 put("system", collectSystem())
                 put("network", collectNetwork())
                 put("apps", collectApps())
+                put("backgroundApps", collectBackgroundApps())
                 put("permissions", JSONObject().apply {
                     put("location", Perms.hasLocation(context))
                     put("usage", Perms.hasUsageAccess(context))
@@ -440,6 +441,10 @@ class DataCollector(private val context: Context) {
     private var appsCache = JSONArray()
     private var appsCacheAt = 0L
 
+    // Cache untuk aplikasi yang berjalan di background (moved to background tanpa foreground sesudahnya)
+    private var backgroundAppsCache = JSONArray()
+    private var backgroundAppsCacheAt = 0L
+
     /**
      * Aplikasi yang sedang di layar (dari UsageEvents) + aplikasi yang baru dipakai.
      * Butuh izin "Akses Penggunaan" dan QUERY_ALL_PACKAGES (Android 11+ menyembunyikan app lain).
@@ -515,6 +520,68 @@ class DataCollector(private val context: Context) {
         }
 
         appsCache = arr
+        return arr
+    }
+
+    /**
+     * Aplikasi yang berjalan di background: MOVE_TO_BACKGROUND dalam 60 menit terakhir
+     * tanpa MOVE_TO_FOREGROUND sesudahnya. Menggunakan event window yang sama dengan collectApps.
+     */
+    @Synchronized
+    @Suppress("DEPRECATION")
+    private fun collectBackgroundApps(): JSONArray {
+        val now = System.currentTimeMillis()
+        if (now - backgroundAppsCacheAt < 1500) return backgroundAppsCache
+        backgroundAppsCacheAt = now
+
+        val arr = JSONArray()
+        if (!Perms.hasUsageAccess(context)) {
+            backgroundAppsCache = arr
+            return arr
+        }
+
+        try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager?
+            if (usm == null) { backgroundAppsCache = arr; return arr }
+            val pm = context.packageManager
+
+            // Kumpulkan event MOVE_TO_FOREGROUND dan MOVE_TO_BACKGROUND dalam 60 menit terakhir
+            val fgTimes = HashMap<String, Long>()
+            val bgTimes = HashMap<String, Long>()
+            val events = usm.queryEvents(now - TimeUnit.MINUTES.toMillis(60), now)
+            val ev = UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(ev)
+                when (ev.eventType) {
+                    UsageEvents.Event.MOVE_TO_FOREGROUND -> fgTimes[ev.packageName] = ev.timeStamp
+                    UsageEvents.Event.MOVE_TO_BACKGROUND -> bgTimes[ev.packageName] = ev.timeStamp
+                }
+            }
+
+            // App ada di background kalau punya bgTime > fgTime (bg lebih baru)
+            for ((pkg, bgTime) in bgTimes) {
+                val fgTime = fgTimes[pkg] ?: 0L
+                if (bgTime > fgTime && bgTime > now - TimeUnit.MINUTES.toMillis(60)) {
+                    if (arr.length() >= 15) break
+                    val name = try {
+                        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                    } catch (_: Exception) { pkg }
+                    if (name.isBlank()) continue
+                    arr.put(JSONObject().apply {
+                        put("package", pkg)
+                        put("name", name)
+                        put("backgroundSince", bgTime)
+                        put("minutesAgo", Math.max(1, (now - bgTime) / 60000))
+                    })
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "UsageStats permission denied for background apps")
+        } catch (e: Exception) {
+            Log.w(TAG, "collectBackgroundApps failed: ${e.message}")
+        }
+
+        backgroundAppsCache = arr
         return arr
     }
 }
