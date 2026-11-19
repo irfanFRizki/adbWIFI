@@ -343,6 +343,14 @@
     if (els.cardBattery) els.cardBattery.classList.remove('is-charging');
     if (els.valStreet) { els.valStreet.textContent = 'Menunggu lokasi...'; els.valStreet.classList.add('dim'); }
     if (els.rawJson) els.rawJson.textContent = '—';
+    // Bagian root milik HP sebelumnya: sembunyikan & kosongkan sampai data HP baru tiba
+    showRootSection(false);
+    [els.listRootBattery, els.listRootThermal, els.listRootCpu, els.listRootFg, els.listRootProcs, els.listRootNet]
+      .forEach((el) => { if (el) el.innerHTML = ''; });
+    [els.footRootBat, els.footRootCpu, els.footRootFg, els.footRootUidump, els.footRootCtrl]
+      .forEach((el) => { if (el) el.textContent = ''; });
+    if (els.listRootUidump) els.listRootUidump.textContent = '—';
+    if (els.chipRoot) setChip(els.chipRoot, '—', '');
   }
 
   function paintLoc(l) {
@@ -503,7 +511,10 @@
   }
 
   function renderRoot(data, c) {
-    if (!data || !data.root) return;
+    if (!data) return;
+    // HP tanpa data root (server lama / tanpa root) harus menyembunyikan bagian root,
+    // bukan membiarkan sisa tampilan dari HP lain yang sebelumnya dipilih.
+    if (!data.root) { showRootSection(false); return; }
     const r = data.root;
     if (!r.hasAccess) {
       showRootSection(false);
