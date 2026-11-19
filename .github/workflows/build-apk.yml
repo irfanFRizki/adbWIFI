@@ -192,6 +192,12 @@ jobs:
           sed -i "s/__APP_VERSION__/${{ steps.dash_ver.outputs.version_name }}/" dashboard-app/www/version.js
           sed -i "s/__APP_VERSION__/${{ steps.dash_ver.outputs.version_name }}/" dashboard-app/www/update-checker.js
 
+      # ── Sinkronkan dashboard-app/www ke assets Android (APK membundel assets/www, bukan www/) ──
+      - name: Sinkronkan web assets ke Android assets
+        run: |
+          mkdir -p dashboard-app/android/app/src/main/assets/www
+          cp -r dashboard-app/www/. dashboard-app/android/app/src/main/assets/www/
+
       # ── Update versionName & versionCode di build.gradle ──
       - name: Update build.gradle version
         run: |

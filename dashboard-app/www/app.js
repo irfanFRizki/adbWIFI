@@ -297,7 +297,9 @@
         // Handle telemetry envelope: { type: "telemetry", data: { ... } }
         const data = (parsed && parsed.type === 'telemetry' && parsed.data) ? parsed.data : parsed;
         render(data);
-      } catch (_) {}
+      } catch (err) {
+        console.error('handleWsMessage/render error:', err);
+      }
     } else if (ev.type === 'open') {
       console.log('WS connected');
     } else if (ev.type === 'close') {
