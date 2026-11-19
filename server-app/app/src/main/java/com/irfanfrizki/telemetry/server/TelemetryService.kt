@@ -449,11 +449,9 @@ class TelemetryService : Service() {
                     </body></html>
                 """.trimIndent()
                 return withCors(newFixedLengthResponse(Response.Status.OK, MIME_HTML, html))
-            }
+                            }
 
-            val path = session.uri?.substringBefore('?') ?: "/"
-
-            val rootFeature = when (path) {
+                            val rootFeature = when (path) {
                 "/api/root/screenshot" -> "screenshot"
                 "/api/root/fgapp" -> "foreground_app"
                 "/api/root/uidump" -> "ui_dump"
