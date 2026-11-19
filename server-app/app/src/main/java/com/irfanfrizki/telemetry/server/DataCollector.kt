@@ -624,4 +624,3 @@ class DataCollector(val context: Context) {
                 }
             }
         }
-    }
