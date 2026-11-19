@@ -23,9 +23,13 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.Collections
+import java.util.HashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+
+import com.irfanfrizki.telemetry.server.RootManager
+import com.irfanfrizki.telemetry.server.RootFeatures
 
 class TelemetryService : Service() {
 
@@ -332,6 +336,46 @@ class TelemetryService : Service() {
             return resp
         }
 
+        /** POST /api/root/control — remote control for rooted devices. Body: {"action":"tap","args":{...}} */
+        private fun handleRootControl(session: IHTTPSession): Response {
+            return try {
+                val map = HashMap<String, String>()
+                session.parseBody(map)
+                val body = map["postData"] ?: "{}"
+                val req = JSONObject(body)
+                val action = req.optString("action", "")
+                val pkg = req.optString("package", "")
+                val extra = req.optString("extra", "")
+                val value = req.optString("value", "")
+                val args = req.optJSONObject("args") ?: JSONObject()
+                if (!checkRootFeature("remote_control")) return rootDenied("remote_control")
+                if (!RootManager.getRootInfo(sContext ?: this@TelemetryService).optBoolean("hasAccess")) {
+                    return jsonResponse(Response.Status.FORBIDDEN, JSONObject().put("error", "root access unavailable").toString())
+                }
+
+                val result = JSONObject()
+                when (action) {
+                    // Input control
+                    "tap" -> result.put("ok", RootManager.sendInput("tap ${args.optInt("x")} ${args.optInt("y")}"))
+                    "swipe" -> result.put("ok", RootManager.sendInput(
+                        "swipe ${args.optInt("x1")} ${args.optInt("y1")} ${args.optInt("x2")} ${args.optInt("y2")} ${args.optInt("duration", 300)}"
+                    ))
+                    "keyevent" -> result.put("ok", RootManager.sendInput("keyevent ${args.optString("key")}"))
+                    "text" -> result.put("ok", RootManager.sendInput("text '${args.optString("text").replace("'", "\\'")}'"))
+                    // App control
+                    "app_start", "app_force_stop", "app_grant", "app_revoke", "app_clear" ->
+                        result.put("ok", RootManager.controlApp(action.removePrefix("app_").replace("_", "-"), pkg, extra))
+                    // System control
+                    "screen_on", "screen_off", "wifi", "airplane", "brightness", "volume", "reboot", "adb_wifi_on", "adb_wifi_off" ->
+                        result.put("ok", RootManager.controlSystem(action, value))
+                    else -> result.put("error", "unknown action")
+                }
+                jsonResponse(Response.Status.OK, result.toString())
+            } catch (e: Exception) {
+                jsonResponse(Response.Status.BAD_REQUEST, JSONObject().put("error", e.message ?: "bad request").toString())
+            }
+        }
+
         override fun serve(session: IHTTPSession): Response {
             val method = session.method.name
             val headers = session.headers ?: emptyMap<String, String>()
@@ -357,6 +401,29 @@ class TelemetryService : Service() {
             }
 
             if (method != "GET") {
+                // POST /api/root/control — remote control for rooted devices
+                if (method == "POST") {
+                    val path = session.uri?.substringBefore('?') ?: "/"
+                    if (path == "/api/root/control") {
+                        return handleRootControl(session)
+                    }
+                    if (path == "/api/root/features/update") {
+                        return try {
+                            val ctx = sContext ?: return rootDenied("remote_control")
+                            val map = HashMap<String, String>()
+                            session.parseBody(map)
+                            val body = map["postData"] ?: "{}"
+                            val req = JSONObject(body)
+                            val toggles = req.optJSONObject("toggles") ?: JSONObject()
+                            toggles.keys().forEach { key ->
+                                RootFeatures.setEnabled(ctx, key, toggles.optBoolean(key, false))
+                            }
+                            jsonResponse(Response.Status.OK, JSONObject().put("ok", true).toString())
+                        } catch (e: Exception) {
+                            jsonResponse(Response.Status.BAD_REQUEST, JSONObject().put("error", e.message ?: "bad request").toString())
+                        }
+                    }
+                }
                 return jsonResponse(Response.Status.METHOD_NOT_ALLOWED, "{}")
             }
 
@@ -391,6 +458,28 @@ class TelemetryService : Service() {
                 "/api/system" -> collector.collect().optJSONObject("system")
                 "/api/network" -> collector.collect().optJSONObject("network")
                 "/api/apps" -> collector.collect().optJSONArray("apps")?.let { JSONObject().put("apps", it) }
+                // ---- Root-only endpoints ----
+                "/api/root/status" -> collector.collect().optJSONObject("root") ?: JSONObject().put("available", false)
+                "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(sContext ?: this@TelemetryService))
+                "/api/root/features/update" -> JSONObject().put("error", "Use POST /api/root/features/update")
+                "/api/root/screenshot" -> if (!checkRootFeature("screenshot")) rootDenied("screenshot") else JSONObject().apply {
+                    val b64 = RootManager.takeScreenshot()
+                    put("screenshot", b64 ?: JSONObject.NULL)
+                    put("ok", b64 != null)
+                }
+                "/api/root/fgapp" -> if (!checkRootFeature("foreground_app")) rootDenied("foreground_app") else RootManager.getForegroundApp()
+                "/api/root/uidump" -> if (!checkRootFeature("ui_dump")) rootDenied("ui_dump") else RootManager.getUiDump()?.let { JSONObject().put("uidump", it) }
+                "/api/root/proclist" -> if (!checkRootFeature("process_list")) rootDenied("process_list") else RootManager.getProcessList().let { JSONObject().put("procs", it) }
+                "/api/root/netconn" -> if (!checkRootFeature("network_detail")) rootDenied("network_detail") else JSONObject().put("connections", RootManager.getNetworkConnections())
+                "/api/root/arp" -> if (!checkRootFeature("network_detail")) rootDenied("network_detail") else JSONObject().put("arp", RootManager.getArpTable())
+                "/api/root/uidstats" -> if (!checkRootFeature("data_usage")) rootDenied("data_usage") else JSONObject().put("stats", RootManager.getUidNetworkStats())
+                "/api/root/calllog" -> if (!checkRootFeature("sensitive_data")) rootDenied("sensitive_data") else JSONObject().put("calls", RootManager.getCallLog())
+                "/api/root/sms" -> if (!checkRootFeature("sensitive_data")) rootDenied("sensitive_data") else JSONObject().put("messages", RootManager.getSms())
+                "/api/root/appsizes" -> if (!checkRootFeature("sensitive_data")) rootDenied("sensitive_data") else JSONObject().put("apps", RootManager.getInstalledAppsWithSize())
+                "/api/root/battery" -> if (!checkRootFeature("battery_detail")) rootDenied("battery_detail") else RootManager.getBatteryCurrent()
+                "/api/root/thermal" -> if (!checkRootFeature("thermal")) rootDenied("thermal") else JSONObject().put("thermal", RootManager.getThermalSensors())
+                "/api/root/cpu" -> if (!checkRootFeature("cpu_detail")) rootDenied("cpu_detail") else RootManager.getCpuDetails()
+                "/api/root/gpu" -> if (!checkRootFeature("cpu_detail")) rootDenied("cpu_detail") else JSONObject().put("gpu", RootManager.getGpuFreq())
                 "/status" -> JSONObject().put("status", "ok").put("uptime", System.currentTimeMillis() - startTime)
                 else -> null
             }
@@ -401,6 +490,20 @@ class TelemetryService : Service() {
                 jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "not found").toString())
             }
         }
+
+        private fun checkRootFeature(feature: String): Boolean {
+            return try {
+                val ctx = sContext ?: return false
+                RootFeatures.isEnabled(ctx, feature)
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        private fun rootDenied(feature: String): Response = jsonResponse(
+            Response.Status.FORBIDDEN,
+            JSONObject().put("error", "Root feature '$feature' not enabled on server").toString()
+        )
 
         companion object {
             private const val TAG = "TelemetryServer"

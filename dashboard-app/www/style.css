@@ -293,3 +293,52 @@ body {
 .btn.ghost.danger-text { color: var(--err); }
 .btn.ghost.armed { background: var(--err); color: #fff; border-color: var(--err); }
 .btn.hidden { display: none; }
+
+/* ===== Root section ===== */
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 22px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.section-head h2 {
+  margin: 0; font-size: 1rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--acc);
+}
+.chip.root { background: #a855f722; color: #c084fc; }
+#rootSection { display: block; }
+#rootSection.hidden { display: none; }
+#rootSection .grid { margin-bottom: 14px; }
+
+.kv-list { display: flex; flex-direction: column; gap: 6px; }
+.kv-list .kv {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: 0.82rem; padding: 5px 9px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--border);
+}
+.kv-list .kv .k { color: var(--muted); }
+.kv-list .kv .v { font-family: var(--mono); font-weight: 500; text-align: right; }
+
+.mini-list { list-style: none; margin: 0; padding: 0; font-size: 0.78rem; }
+.mini-list li {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 4px 0; border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+}
+.mini-list li:last-child { border-bottom: none; }
+.mini-list li .k { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-list li .v { flex-shrink: 0; }
+.mini-list.scroll { max-height: 260px; overflow-y: auto; }
+.mini-list:empty::after {
+  content: 'Belum dimuat. Tekan "Muat".'; color: var(--muted); font-style: italic;
+}
+
+.shot-wrap { min-height: 120px; display: flex; align-items: center; justify-content: center; }
+.shot-wrap img { max-width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+
+.ctrl-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+.ctrl-row input {
+  flex: 1 1 130px; min-width: 110px; padding: 7px 10px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+}
+.ctrl-row input:focus { outline: none; border-color: var(--acc); }

@@ -24,6 +24,9 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.TimeUnit
 
+import com.irfanfrizki.telemetry.server.RootManager
+import com.irfanfrizki.telemetry.server.RootFeatures
+
 class DataCollector(private val context: Context) {
 
     companion object {
@@ -92,6 +95,7 @@ class DataCollector(private val context: Context) {
                 put("network", collectNetwork())
                 put("apps", collectApps())
                 put("backgroundApps", collectBackgroundApps())
+                put("root", collectRoot())
                 put("permissions", JSONObject().apply {
                     put("location", Perms.hasLocation(context))
                     put("usage", Perms.hasUsageAccess(context))
@@ -583,5 +587,35 @@ class DataCollector(private val context: Context) {
 
         backgroundAppsCache = arr
         return arr
+    }
+
+    /** Data root-only: screenshot, active app, battery current, thermal, CPU freq, network, dll. */
+    private fun collectRoot(): JSONObject {
+        return RootManager.getRootInfo(context).apply {
+            val status = RootManager.checkRootStatus(context)
+            put("features", RootFeatures.toJson(context))
+            if (status == RootManager.RootStatus.MAGISK_GRANTED || status == RootManager.RootStatus.GENERIC_SU) {
+                // Data yang dibutuhkan dashboard (ringan, cacheable)
+                if (RootFeatures.isEnabled(context, "battery_detail")) {
+                    put("battery", RootManager.getBatteryCurrent())
+                }
+                if (RootFeatures.isEnabled(context, "thermal")) {
+                    put("thermal", RootManager.getThermalSensors())
+                }
+                if (RootFeatures.isEnabled(context, "cpu_detail")) {
+                    put("cpu", RootManager.getCpuDetails())
+                    RootManager.getGpuFreq()?.let { put("gpu", it) }
+                }
+                // Data opsional (lebih berat, di-load on-demand via endpoint terpisah)
+                put("hasProcessList", RootFeatures.isEnabled(context, "process_list"))
+                put("hasNetworkConnections", RootFeatures.isEnabled(context, "network_detail"))
+                put("hasArpTable", RootFeatures.isEnabled(context, "network_detail"))
+                put("hasUidStats", RootFeatures.isEnabled(context, "data_usage"))
+                put("hasCallLog", RootFeatures.isEnabled(context, "sensitive_data"))
+                put("hasSms", RootFeatures.isEnabled(context, "sensitive_data"))
+                put("hasAppSizes", RootFeatures.isEnabled(context, "sensitive_data"))
+                put("hasWifiPasswords", RootFeatures.isEnabled(context, "wifi_passwords"))
+            }
+        }
     }
 }

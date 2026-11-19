@@ -19,12 +19,15 @@ import android.text.TextUtils
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
+import com.irfanfrizki.telemetry.server.RootManager
+import com.irfanfrizki.telemetry.server.RootFeatures
 import com.irfanfrizki.telemetry.server.UpdateChecker
 
 class MainActivity : AppCompatActivity() {
@@ -54,6 +57,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var updateChecker: UpdateChecker
     private var latestRelease: UpdateChecker.Release? = null
 
+    // Root features UI
+    private lateinit var cardRootFeatures: com.google.android.material.card.MaterialCardView
+    private lateinit var tvRootStatus: TextView
+    private lateinit var llRootFeatures: LinearLayout
+    private lateinit var btnApplyRootFeatures: Button
+    private var rootFeatureCheckBoxes: MutableMap<String, MaterialCheckBox> = mutableMapOf()
+
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences("telemetry_server", Context.MODE_PRIVATE)
     }
@@ -82,6 +92,13 @@ class MainActivity : AppCompatActivity() {
         updateChecker = UpdateChecker(this) { message -> tvUpdateStatus.text = message }
         tvVersion.text = getString(R.string.version_label, updateChecker.currentVersion())
 
+        // Root features views
+        cardRootFeatures = findViewById(R.id.cardRootFeatures)
+        tvRootStatus = findViewById(R.id.tvRootStatus)
+        llRootFeatures = findViewById(R.id.llRootFeatures)
+        btnApplyRootFeatures = findViewById(R.id.btnApplyRootFeatures)
+        buildRootFeatureCheckboxes()
+
         loadSettings()
         updateUI()
 
@@ -94,10 +111,58 @@ class MainActivity : AppCompatActivity() {
         checkForUpdate(manual = false)
     }
 
+    private fun buildRootFeatureCheckboxes() {
+        llRootFeatures.removeAllViews()
+        rootFeatureCheckBoxes.clear()
+
+        val ctx = this
+        RootFeatures.ALL.forEach { key ->
+            val cb = MaterialCheckBox(ctx).apply {
+                text = RootFeatures.label(key)
+                isChecked = RootFeatures.isEnabled(ctx, key)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(0, 8, 0, 8) }
+            }
+            rootFeatureCheckBoxes[key] = cb
+            llRootFeatures.addView(cb)
+        }
+
+        btnApplyRootFeatures.setOnClickListener {
+            rootFeatureCheckBoxes.forEach { (key, cb) ->
+                RootFeatures.setEnabled(ctx, key, cb.isChecked)
+            }
+            Toast.makeText(this, "Root features disimpan", Toast.LENGTH_SHORT).show()
+            if (TelemetryService.isRunning()) {
+                RootManager.forceRecheck(this)
+            }
+        }
+    }
+
+    private fun updateRootFeaturesUI() {
+        val status = RootManager.checkRootStatus(this)
+        val hasRootAccess = status == RootManager.RootStatus.MAGISK_GRANTED || status == RootManager.RootStatus.GENERIC_SU
+
+        if (hasRootAccess) {
+            cardRootFeatures.visibility = View.VISIBLE
+            val magisk = status == RootManager.RootStatus.MAGISK_GRANTED
+            val label = if (magisk) "Magisk ✔" else "Generic su ✔"
+            tvRootStatus.text = "Root: $label | ${RootFeatures.ALL.count { RootFeatures.isEnabled(this, it) }} fitur aktif"
+            rootFeatureCheckBoxes.forEach { (key, cb) ->
+                cb.isChecked = RootFeatures.isEnabled(this, key)
+            }
+        } else {
+            cardRootFeatures.visibility = View.GONE
+            tvRootStatus.text = "Root: tidak terdeteksi"
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         updatePermStatus()
         updateUI()
+        updateRootFeaturesUI()
     }
 
 

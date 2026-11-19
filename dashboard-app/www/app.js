@@ -83,6 +83,25 @@
     btnCopyJson: $('#btnCopyJson'),
     btnToggleRaw: $('#btnToggleRaw'),
 
+    // Root section
+    rootSection: $('#rootSection'),
+    chipRoot: $('#chipRoot'),
+    listRootBattery: $('#listRootBattery'),
+    footRootBat: $('#footRootBat'),
+    listRootThermal: $('#listRootThermal'),
+    listRootCpu: $('#listRootCpu'),
+    footRootCpu: $('#footRootCpu'),
+    shotWrap: $('#shotWrap'),
+    listRootFg: $('#listRootFg'),
+    footRootFg: $('#footRootFg'),
+    listRootProcs: $('#listRootProcs'),
+    listRootNet: $('#listRootNet'),
+    footRootCtrl: $('#footRootCtrl'),
+    chipRootCtrl: $('#chipRootCtrl'),
+    inpPkg: $('#inpPkg'),
+    inpTap: $('#inpTap'),
+    inpKey: $('#inpKey'),
+
     layerSettings: $('#layerSettings'),
     formSettings: $('#formSettings'),
     verLabel: $('#verLabel'),
@@ -432,7 +451,232 @@
 
     if (data.backgroundApps) renderBackgroundApps(data.backgroundApps, data.permissions);
 
+    renderRoot(data, c);
     renderRaw();
+  }
+
+  // ===== Root section rendering =====
+  function showRootSection(show) {
+    if (els.rootSection) els.rootSection.classList.toggle('hidden', !show);
+  }
+
+  function buildHttpUrl(dev, path) {
+    if (!dev) return null;
+    const base = `http://${dev.ip}:${dev.port}`;
+    let url = base + path;
+    if (dev.token) url += '?token=' + encodeURIComponent(dev.token);
+    return url;
+  }
+
+  async function fetchRoot(dev, path) {
+    const url = buildHttpUrl(dev, path);
+    if (!url) return null;
+    try {
+      const res = await fetch(url, { method: 'GET' });
+      if (res.status === 403) {
+        return { error: 'Feature not enabled on server' };
+      }
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function postRoot(dev, path, body) {
+    const url = buildHttpUrl(dev, path);
+    if (!url) return null;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (res.status === 403) return { error: 'Feature not enabled on server' };
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function renderRoot(data, c) {
+    if (!data || !data.root) return;
+    const r = data.root;
+    if (!r.hasAccess) {
+      showRootSection(false);
+      return;
+    }
+    // Hanya tampilkan bagian root jika minimal satu fitur disetujui di HP server.
+    const feats = r.features || {};
+    const anyApproved = Object.values(feats).some(Boolean);
+    showRootSection(anyApproved);
+    if (!anyApproved) return;
+
+    const statusText = r.isMagisk ? 'Magisk ✔' : 'Generic su ✔';
+    setChip(els.chipRoot, statusText, 'ok');
+
+    // Tampilkan kartu sesuai fitur yang disetujui pemilik HP server.
+    const map = [
+      ['.card-root-battery', 'battery_detail'],
+      ['.card-root-thermal', 'thermal'],
+      ['.card-root-cpu', 'cpu_detail'],
+      ['.card-root-screen', 'screenshot'],
+      ['.card-root-fg', 'foreground_app'],
+      ['.card-root-procs', 'process_list'],
+      ['.card-root-net', 'network_detail'],
+      ['.card-root-control', 'remote_control'],
+    ];
+    map.forEach(([sel, key]) => {
+      const node = els.rootSection ? els.rootSection.querySelector(sel) : null;
+      if (node) node.style.display = feats[key] ? '' : 'none';
+    });
+
+    if (els.chipRootCtrl) {
+      els.chipRootCtrl.textContent = feats.remote_control ? 'aktif' : 'nonaktif';
+    }
+
+    // Battery detail
+    if (els.listRootBattery && r.battery && feats.battery_detail) {
+      const b = r.battery;
+      const lines = [];
+      if (b.currentMa != null) lines.push({ k: 'Arus', v: `${b.currentMa > 0 ? '+' : ''}${b.currentMa} mA` });
+      if (b.currentAvgMa != null) lines.push({ k: 'Arus rata-rata', v: `${b.currentAvgMa > 0 ? '+' : ''}${b.currentAvgMa} mA` });
+      if (b.voltageMv != null) lines.push({ k: 'Tegangan', v: `${(b.voltageMv / 1000).toFixed(2)} V` });
+      if (b.level != null) lines.push({ k: 'Level', v: `${b.level}%` });
+      if (b.designCapacityMah != null) lines.push({ k: 'Desain', v: `${b.designCapacityMah} mAh` });
+      if (b.fullCapacityMah != null) lines.push({ k: 'Sekarang', v: `${b.fullCapacityMah} mAh` });
+      if (b.cycleCount != null) lines.push({ k: 'Siklus', v: `${b.cycleCount}` });
+      if (b.healthRaw != null) lines.push({ k: 'Kesehatan', v: b.healthRaw });
+      if (b.statusRaw != null) lines.push({ k: 'Status', v: b.statusRaw });
+      if (b.tempC != null) lines.push({ k: 'Suhu', v: `${b.tempC.toFixed(1)}°C` });
+      if (b.technology != null) lines.push({ k: 'Teknologi', v: b.technology });
+      els.listRootBattery.innerHTML = lines.map(x => `<div class="kv"><span class="k">${esc(x.k)}</span><span class="v">${esc(x.v)}</span></div>`).join('');
+    }
+
+    // Thermal
+    if (els.listRootThermal && r.thermal) {
+      els.listRootThermal.innerHTML = r.thermal.map(t =>
+        `<li><span class="k">${esc(t.zone)} (${esc(t.type)})</span><span class="v">${esc(t.tempC)}°C</span></li>`
+      ).join('');
+    }
+
+    // CPU
+    if (els.listRootCpu && r.cpu) {
+      const c = r.cpu;
+      const lines = [];
+      lines.push({ k: 'Core', v: `${c.cores} core` });
+      if (c.loadAvg1m != null) lines.push({ k: 'Load 1m', v: c.loadAvg1m.toFixed(2) });
+      if (c.frequencies) {
+        c.frequencies.forEach(f => {
+          if (f.curMhz != null) lines.push({ k: `CPU${f.core} freq`, v: `${f.curMhz} MHz` });
+        });
+      }
+      if (c.governors) {
+        c.governors.forEach(g => lines.push({ k: `CPU${g.core} gov`, v: g.governor }));
+      }
+      if (r.gpu && r.gpu.gpuFreqMhz != null) lines.push({ k: 'GPU', v: `${r.gpu.gpuFreqMhz} MHz` });
+      els.listRootCpu.innerHTML = lines.map(x => `<div class="kv"><span class="k">${esc(x.k)}</span><span class="v">${esc(x.v)}</span></div>`).join('');
+      if (els.footRootCpu) {
+        els.footRootCpu.textContent = `Total jiffies: ${c.procTotal || '?'} | Idle: ${c.procIdle || '?'}`;
+      }
+    }
+
+    // Root features toggles status
+    if (r.features) {
+      const featLines = [];
+      for (const [k, v] of Object.entries(r.features)) {
+        if (v) featLines.push(`<li><span class="k">${esc(k)}</span><span class="v">✔</span></li>`);
+      }
+      if (els.listRootNet && featLines.length) {
+        // repurpose listRootNet's empty state for features if needed
+      }
+    }
+  }
+
+  async function onScreenshot(dev, c) {
+    if (!dev) return;
+    if (els.shotWrap) els.shotWrap.innerHTML = '<span class="hint">Mengambil screenshot...</span>';
+    const res = await fetchRoot(dev, '/api/root/screenshot');
+    if (!res || res.error) {
+      if (els.shotWrap) els.shotWrap.innerHTML = `<span class="hint">${res?.error || 'Gagal mengambil screenshot'}</span>`;
+      return;
+    }
+    if (res.screenshot) {
+      const img = new Image();
+      img.src = 'data:image/png;base64,' + res.screenshot;
+      img.style.maxWidth = '100%';
+      img.style.borderRadius = '8px';
+      img.style.border = '1px solid var(--border)';
+      if (els.shotWrap) { els.shotWrap.innerHTML = ''; els.shotWrap.appendChild(img); }
+    }
+  }
+
+  async function onLoadFgApp(dev, c) {
+    if (!dev) return;
+    const res = await fetchRoot(dev, '/api/root/fgapp');
+    if (!res) return;
+    if (els.listRootFg) {
+      if (res.raw) {
+        els.listRootFg.innerHTML = `<div class="kv"><span class="k">Raw</span><span class="v">${esc(res.raw)}</span></div>`;
+      } else {
+        els.listRootFg.innerHTML = '<span class="hint">Tidak ada data</span>';
+      }
+    }
+    if (els.footRootFg) els.footRootFg.textContent = 'dumpsys window/activity';
+  }
+
+  async function onLoadProcs(dev, c) {
+    if (!dev) return;
+    if (els.listRootProcs) els.listRootProcs.innerHTML = '<span class="hint">Memuat...</span>';
+    const res = await fetchRoot(dev, '/api/root/proclist');
+    if (!res) { if (els.listRootProcs) els.listRootProcs.innerHTML = '<span class="hint">Gagal</span>'; return; }
+    if (res.procs && res.procs.length) {
+      els.listRootProcs.innerHTML = res.procs.map(p => `<li><span class="k">${esc(String(p).substring(0, 50))}</span></li>`).join('');
+    } else {
+      els.listRootProcs.innerHTML = '<span class="hint">Kosong</span>';
+    }
+  }
+
+  async function onLoadNet(dev, c) {
+    if (!dev) return;
+    if (els.listRootNet) els.listRootNet.innerHTML = '<span class="hint">Memuat...</span>';
+    const [connRes, arpRes] = await Promise.all([
+      fetchRoot(dev, '/api/root/netconn'),
+      fetchRoot(dev, '/api/root/arp')
+    ]);
+    const lines = [];
+    if (connRes && connRes.connections && connRes.connections.length) {
+      connRes.connections.slice(0, 30).forEach(x => {
+        lines.push(`<li><span class="k">${esc(x.proto)} ${esc(x.local)}</span><span class="v">${esc(x.remote)} (${esc(x.state)})</span></li>`);
+      });
+    }
+    if (arpRes && arpRes.arp && arpRes.arp.length) {
+      arpRes.arp.forEach(x => {
+        lines.push(`<li><span class="k">ARP ${esc(x.ip)}</span><span class="v">${esc(x.mac)} @ ${esc(x.device)}</span></li>`);
+      });
+    }
+    if (els.listRootNet) els.listRootNet.innerHTML = lines.length ? lines.join('') : '<span class="hint">Kosong</span>';
+  }
+
+  async function onControl(action, value, dev, c) {
+    if (!dev) return;
+    const res = await postRoot(dev, '/api/root/control', { action, value });
+    if (els.footRootCtrl) {
+      if (!res) els.footRootCtrl.textContent = 'Gagal: tidak ada respons';
+      else if (res.error) els.footRootCtrl.textContent = `Error: ${res.error}`;
+      else els.footRootCtrl.textContent = `OK: ${JSON.stringify(res)}`.substring(0, 200);
+    }
+  }
+
+  async function onAppControl(appAction, pkg, dev, c) {
+    if (!dev || !pkg) return;
+    const res = await postRoot(dev, '/api/root/control', { action: appAction, package: pkg });
+    if (els.footRootCtrl) {
+      if (!res) els.footRootCtrl.textContent = 'Gagal';
+      else if (res.error) els.footRootCtrl.textContent = `Error: ${res.error}`;
+      else els.footRootCtrl.textContent = `OK`;
+    }
   }
 
   // ===== Data mentah: sembunyikan / tampilkan, salin tetap jalan =====
@@ -863,6 +1107,64 @@
     els.setToken.type = isPwd ? 'text' : 'password';
     els.tokenToggle.textContent = isPwd ? 'Sembunyikan' : 'Lihat';
   });
+
+  // Root section buttons
+  if (els.listRootFg) {
+    els.listRootFg.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-reload]');
+      if (!btn) return;
+      const dev = getDev(selectedId);
+      const c = conns.get(selectedId);
+      if (dev && c) onLoadFgApp(dev, c);
+    });
+  }
+
+  if (els.rootSection) {
+    els.rootSection.addEventListener('click', (e) => {
+      const dev = getDev(selectedId);
+      const c = conns.get(selectedId);
+      if (!dev || !c) return;
+
+      const actBtn = e.target.closest('[data-action]');
+      if (actBtn) {
+        const act = actBtn.getAttribute('data-action');
+        if (act === 'loadprocs') { onLoadProcs(dev, c); return; }
+        if (act === 'loadnet') { onLoadNet(dev, c); return; }
+        if (act === 'loadfg') { onLoadFgApp(dev, c); return; }
+        if (act === 'screenshot') { onScreenshot(dev, c); return; }
+      }
+
+      const ctlBtn = e.target.closest('[data-ctl]');
+      if (ctlBtn) {
+        const action = ctlBtn.getAttribute('data-ctl');
+        const value = ctlBtn.getAttribute('data-value') || '';
+        onControl(action, value, dev, c);
+        return;
+      }
+
+      const appBtn = e.target.closest('[data-app]');
+      if (appBtn) {
+        const appAction = appBtn.getAttribute('data-app');
+        const pkg = els.inpPkg?.value?.trim();
+        onAppControl(appAction, pkg, dev, c);
+        return;
+      }
+
+      if (e.target.id === 'btnTap') {
+        const tap = els.inpTap?.value?.trim();
+        if (tap) {
+          const [x, y] = tap.split(',').map(s => s.trim());
+          if (x && y) onControl('tap', JSON.stringify({ x: parseInt(x), y: parseInt(y) }), dev, c);
+        }
+        return;
+      }
+
+      if (e.target.id === 'btnKey') {
+        const key = els.inpKey?.value?.trim();
+        if (key) onControl('keyevent', JSON.stringify({ key }), dev, c);
+      }
+    });
+  }
 
   $$('[data-close]').forEach(btn => {
     btn.addEventListener('click', () => {
