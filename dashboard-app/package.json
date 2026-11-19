@@ -3,18 +3,8 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
-    "build": "npm run build:web && npx cap sync",
-    "build:web": "echo 'Web build - www/ is ready'",
-    "android": "npx cap open android",
-    "ios": "npx cap open ios",
-    "sync": "npx cap sync"
+    "build": "echo 'Web build - www/ is ready'"
   },
-  "dependencies": {
-    "@capacitor/android": "^6.1.2",
-    "@capacitor/core": "^6.1.2",
-    "@capacitor/filesystem": "^6.0.4"
-  },
-  "devDependencies": {
-    "@capacitor/cli": "^6.1.2"
-  }
+  "dependencies": {},
+  "devDependencies": {}
 }
