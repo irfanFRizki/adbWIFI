@@ -293,7 +293,9 @@
   function handleWsMessage(ev) {
     if (ev.type === 'message') {
       try {
-        const data = JSON.parse(ev.data);
+        const parsed = JSON.parse(ev.data);
+        // Handle telemetry envelope: { type: "telemetry", data: { ... } }
+        const data = (parsed && parsed.type === 'telemetry' && parsed.data) ? parsed.data : parsed;
         render(data);
       } catch (_) {}
     } else if (ev.type === 'open') {
