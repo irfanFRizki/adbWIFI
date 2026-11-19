@@ -624,4 +624,4 @@ class DataCollector(private val context: Context) {
                 }
             }
         }
-}
+    }
