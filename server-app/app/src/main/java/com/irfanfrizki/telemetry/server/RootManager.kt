@@ -12,10 +12,6 @@ import java.io.InputStreamReader
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.util.concurrent.TimeoutException
-
 /**
  * Root detection and privileged command execution.
  * All su commands run on background thread with timeout.
@@ -58,75 +54,72 @@ object RootManager {
     }
 
     /**
-         * Cek status root dengan benar untuk Magisk modern.
-         * Kuncinya: JANGAN cek File.exists() path su — Magisk menyembunyikannya.
-         * Langsung coba jalankan "su -c id" dan lihat hasilnya.
-         */
-        private fun computeRootStatus(context: Context): RootStatus {
-            // Coba jalankan su -c id (timeout 5 detik) — memicu dialog Magisk secara otomatis
-            val output = executeRootCommandBlocking("su -c id")
-            val hasRootAccess = output?.contains("uid=0") == true
+     * Cek status root untuk Magisk modern.
+     * JANGAN cek File.exists() pada path su — Magisk menyembunyikannya dari app non-root.
+     * Eksekusi "su -c id" langsung, itulah yang memicu dialog izin Magisk.
+     */
+    private fun computeRootStatus(context: Context): RootStatus {
+        val output = executeRootCommandBlocking("id")
+        val hasRootAccess = output?.contains("uid=0") == true
 
-            // Cek apakah Magisk terpasang (via package manager atau path khas)
-            val isMagisk = try {
-                context.packageManager.getPackageInfo("com.topjohnwu.magisk", 0)
-                true
-            } catch (_: Exception) {
-                // Fallback: cek path Magisk yang mungkin terbaca
-                File("/data/adb/magisk").exists() || File("/magisk").exists()
-            }
-
-            return when {
-                isMagisk && hasRootAccess -> RootStatus.MAGISK_GRANTED
-                isMagisk -> RootStatus.MAGISK_DENIED
-                hasRootAccess -> RootStatus.GENERIC_SU
-                else -> RootStatus.NONE
-            }
+        val isMagisk = try {
+            context.packageManager.getPackageInfo("com.topjohnwu.magisk", 0)
+            true
+        } catch (_: Exception) {
+            File("/data/adb/magisk").exists() || File("/magisk").exists()
         }
 
-        /**
-         * Jalankan perintah root di thread terpisah (IO), kembalikan output (trimmed)
-         * atau null jika gagal/timeout. Menggunakan timeout yang benar.
-         */
-        private fun executeRootCommandBlocking(cmd: String): String? {
-            
-                // Baca output di thread terpisah agar tidak deadlock dengan waitFor
-                val output = StringBuilder()
-                val reader = BufferedReader(InputStreamReader(process.inputStream))
-                val readerThread = Thread {
-                    try {
-                        var line: String?
-                        while (reader.readLine().also { line = it } != null) {
-                            output.append(line).append('\n')
-                        }
-                    } catch (_: Exception) {}
-                }
-                readerThread.start()
-            
-                // Wait with timeout
-                val finished = process.waitFor(SU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                if (!finished) {
-                    process.destroyForcibly()
-                    Log.w(TAG, "su -c timeout: $cmd")
-                    readerThread.join(100)
-                    return null
-                }
-            
-                readerThread.join(100)
-            
-                val exitValue = process.exitValue()
-                if (exitValue != 0) {
-                    val err = process.errorStream.bufferedReader().use { it.readText() }
-                    Log.w(TAG, "su -c exit $exitValue: $cmd, err: $err")
-                    return null
-                }
-            
-                output.toString().trim()
-            } catch (e: Exception) {
-                Log.w(TAG, "su -c failed: $cmd", e)
-                null
-            }
+        return when {
+            isMagisk && hasRootAccess -> RootStatus.MAGISK_GRANTED
+            isMagisk -> RootStatus.MAGISK_DENIED
+            hasRootAccess -> RootStatus.GENERIC_SU
+            else -> RootStatus.NONE
         }
+    }
+
+    /**
+     * Jalankan perintah root lewat "su -c" di thread IO dengan timeout.
+     * Output dibaca di thread terpisah supaya waitFor() tidak deadlock saat
+     * Magisk menahan proses untuk menampilkan dialog izin.
+     */
+    private fun executeRootCommandBlocking(cmd: String): String? {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+
+            val output = StringBuilder()
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val readerThread = Thread {
+                try {
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        output.append(line).append('\n')
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            readerThread.start()
+
+            val finished = process.waitFor(SU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                Log.w(TAG, "su -c timeout: $cmd")
+                return null
+            }
+
+            readerThread.join(200)
+
+            if (process.exitValue() != 0) {
+                val err = process.errorStream.bufferedReader().use { it.readText() }
+                Log.w(TAG, "su -c exit ${process.exitValue()}: $cmd, err: $err")
+                return null
+            }
+
+            output.toString().trim()
+        } catch (e: Exception) {
+            Log.w(TAG, "su -c failed: $cmd", e)
+            null
+        }
+    }
 
     /** Jalankan banyak perintah root sekaligus (satu su session), return map cmd->output. */
     fun executeRootCommands(cmds: Array<String>): Map<String, String?> {
