@@ -175,9 +175,9 @@
       els.valBatLevel.textContent = level;
       els.barBat.style.width = `${clamp(level, 0, 100)}%`;
       els.barBat.className = level <= 15 ? 'low' : (level <= 40 ? 'mid' : '');
-      els.valBatTemp.textContent = b.temp ? `${b.temp.toFixed(1)}°C` : '—';
+      els.valBatTemp.textContent = b.temp != null ? `${b.temp.toFixed(1)}°C` : '—';
       els.valBatVolt.textContent = b.voltageMv ? `${(b.voltageMv / 1000).toFixed(2)}V` : '—';
-      els.valBatCurr.textContent = b.currentMa ? `${b.currentMa}mA` : '—';
+      els.valBatCurr.textContent = b.currentMa != null ? `${b.currentMa}mA` : '—';
       els.footBat.textContent = `Health: ${b.health || '—'} • Tech: ${b.technology || '—'} • Updated: ${new Date(b.timestamp || Date.now()).toLocaleTimeString()}`;
     }
 
