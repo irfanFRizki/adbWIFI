@@ -469,6 +469,43 @@ class TelemetryService : Service() {
             }
 
             val responseJson: JSONObject? = when (path) {
+                "/api/data", "/api/all" -> collector.collect()
+                "/api/battery" -> collector.collect().optJSONObject("battery")
+                "/api/location" -> collector.collect().optJSONObject("location")
+                "/api/system" -> collector.collect().optJSONObject("system")
+                "/api/network" -> collector.collect().optJSONObject("network")
+                "/api/apps" -> collector.collect().optJSONArray("apps")?.let { JSONObject().put("apps", it) }
+                "/api/root/status" -> collector.collect().optJSONObject("root") ?: JSONObject().put("available", false)
+                "/api/root/features" -> JSONObject().put("features", RootFeatures.toJson(sContext))
+                "/api/root/features/update" -> JSONObject().put("error", "Use POST /api/root/features/update")
+                "/api/root/screenshot" -> JSONObject().apply {
+                    val b64 = RootManager.takeScreenshot()
+                    put("screenshot", b64 ?: JSONObject.NULL)
+                    put("ok", b64 != null)
+                }
+                "/api/root/fgapp" -> RootManager.getForegroundApp()
+                "/api/root/uidump" -> RootManager.getUiDump()?.let { JSONObject().put("uidump", it) }
+                "/api/root/proclist" -> RootManager.getProcessList().let { JSONObject().put("procs", it) }
+                "/api/root/netconn" -> JSONObject().put("connections", RootManager.getNetworkConnections())
+                "/api/root/arp" -> JSONObject().put("arp", RootManager.getArpTable())
+                "/api/root/uidstats" -> JSONObject().put("stats", RootManager.getUidNetworkStats())
+                "/api/root/calllog" -> JSONObject().put("calls", RootManager.getCallLog())
+                "/api/root/sms" -> JSONObject().put("messages", RootManager.getSms())
+                "/api/root/appsizes" -> JSONObject().put("apps", RootManager.getInstalledAppsWithSize())
+                "/api/root/battery" -> RootManager.getBatteryCurrent()
+                "/api/root/thermal" -> JSONObject().put("thermal", RootManager.getThermalSensors())
+                "/api/root/cpu" -> RootManager.getCpuDetails()
+                "/api/root/gpu" -> JSONObject().put("gpu", RootManager.getGpuFreq())
+                "/status" -> JSONObject().put("status", "ok").put("uptime", System.currentTimeMillis() - startTime)
+                else -> null
+            }
+
+            return if (responseJson != null) {
+                jsonResponse(Response.Status.OK, responseJson.toString(2))
+            } else {
+                jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "not found").toString())
+            }
+        }
 
         private fun checkRootFeature(feature: String): Boolean {
             return try {
