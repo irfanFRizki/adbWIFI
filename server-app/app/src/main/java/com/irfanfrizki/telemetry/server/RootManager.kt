@@ -209,7 +209,7 @@ object RootManager {
                 arr.put(JSONObject().apply {
                     put("zone", zone.name)
                     put("type", type ?: "unknown")
-                    put("tempC", (it.toDouble() / 1000).toString("%.1f"))
+                    put("tempC", String.format("%.1f", it.toDouble() / 1000))
                 })
             }
         }
