@@ -349,7 +349,7 @@ class TelemetryService : Service() {
                 val value = req.optString("value", "")
                 val args = req.optJSONObject("args") ?: JSONObject()
                 if (!checkRootFeature("remote_control")) return rootDenied("remote_control")
-                if (!RootManager.getRootInfo(sContext ?: collector.context()).optBoolean("hasAccess")) {
+                if (!RootManager.getRootInfo(sContext ?: collector.context).optBoolean("hasAccess")) {
                     return jsonResponse(Response.Status.FORBIDDEN, JSONObject().put("error", "root access unavailable").toString())
                 }
 
