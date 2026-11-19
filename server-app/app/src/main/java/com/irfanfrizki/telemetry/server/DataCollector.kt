@@ -417,9 +417,10 @@ class DataCollector(val context: Context) {
                                 ipLocal = addr.hostAddress
                                 break
                             }
-                        }
-                    }
-                }
+                                        }
+                                    }
+                                }
+                            }
             } catch (_: Exception) {}
         }
 
