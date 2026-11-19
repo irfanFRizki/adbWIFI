@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
 import com.irfanfrizki.telemetry.server.RootManager
 import com.irfanfrizki.telemetry.server.RootFeatures
 
-class DataCollector(private val context: Context) {
+class DataCollector(val context: Context) {
 
     companion object {
         private const val TAG = "DataCollector"
