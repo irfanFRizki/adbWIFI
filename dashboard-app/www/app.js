@@ -33,6 +33,7 @@
     banner: $('#banner'),
     btnRefresh: $('#btnRefresh'),
     btnSettings: $('#btnSettings'),
+    btnCheckUpdate: $('#btnCheckUpdate'),
     btnManageDevices: $('#btnManageDevices'),
     deviceSelector: $('#deviceSelector'),
     
@@ -505,6 +506,19 @@
     }
   }
 
+  async function onCheckUpdate() {
+    if (typeof window.checkForTelemetryUpdate === 'function') {
+      showToast('Memeriksa update…');
+      try {
+        await window.checkForTelemetryUpdate();
+      } catch (e) {
+        showToast('Gagal cek update: ' + (e.message || e), true);
+      }
+    } else {
+      showToast('Update checker tidak tersedia', true);
+    }
+  }
+
   // ===== Toggle raw JSON =====
   function toggleRaw() {
     const hidden = els.rawJson.classList.toggle('hidden');
@@ -525,6 +539,7 @@
   els.btnStopServer.addEventListener('click', onStopServer);
   els.btnToggleRaw.addEventListener('click', toggleRaw);
   els.btnCopyJson.addEventListener('click', copyJson);
+  els.btnCheckUpdate.addEventListener('click', onCheckUpdate);
 
   // Device management bindings
   els.deviceSelector.addEventListener('change', (e) => selectDevice(e.target.value));
