@@ -321,6 +321,13 @@ class MainActivity : AppCompatActivity() {
         val token = etToken.text.toString()
         val interval = etInterval.text.toString().toIntOrNull() ?: 1
 
+        // Keamanan: bind ke semua interface tanpa token = siapa pun di jaringan bisa baca telemetri
+        if (cbBindAll.isChecked && token.isBlank()) {
+            Toast.makeText(this, "Isi Auth Token dulu (wajib saat Bind to All Interfaces aktif)", Toast.LENGTH_LONG).show()
+            etToken.requestFocus()
+            return
+        }
+
         TelemetryService.start(this, port, wsPort, token, interval)
         updateUI()
     }
